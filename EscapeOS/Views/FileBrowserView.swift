@@ -20,6 +20,7 @@ struct FileBrowserView: View {
     @State private var selected = Set<String>()
     @State private var pendingDelete: [FileItem] = []
     @State private var archivePassword = ""
+    @State private var showImportCollision = false
 
     init(app: InstalledApp) {
         self.app = app
@@ -104,6 +105,7 @@ struct FileBrowserView: View {
                         } label: {
                             Label("Import from Files", systemImage: "square.and.arrow.down")
                         }
+                        .disabled(vm.isBusy || vm.pendingImport != nil)
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -219,6 +221,28 @@ struct FileBrowserView: View {
             }
         } message: {
             Text("This cannot be undone. Close the target app first if the file might be in use.")
+        }
+        .alert(
+            vm.pendingImportTitle,
+            isPresented: $showImportCollision,
+            presenting: vm.pendingImport
+        ) { prompt in
+            Button("Cancel", role: .cancel) {
+                vm.cancelPendingImport()
+            }
+            Button("Keep Both") {
+                vm.finishPendingImport(prompt, policy: .keepBoth)
+            }
+            if !prompt.collidingFileNames.isEmpty {
+                Button("Replace") {
+                    vm.finishPendingImport(prompt, policy: .replace)
+                }
+            }
+        } message: { prompt in
+            Text(FileBrowserViewModel.importCollisionMessage(for: prompt))
+        }
+        .onChange(of: vm.pendingImport?.id) { _ in
+            showImportCollision = vm.pendingImport != nil
         }
         .sheet(item: $propertiesItem) { item in
             FilePropertiesView(app: app, item: item)
@@ -639,6 +663,7 @@ final class FileBrowserViewModel: ObservableObject {
     @Published var operationError: IdentifiedError?
     @Published var unzipPasswordItem: FileItem?
     @Published var unzipPasswordMessage = "This archive is password-protected. Enter the password to extract it."
+    @Published var pendingImport: PendingImportPrompt?
 
     var isBusy: Bool { isZipping || isExporting || isPasting }
 
@@ -658,6 +683,54 @@ final class FileBrowserViewModel: ObservableObject {
     var displayTitle: String {
         let last = (currentPath as NSString).lastPathComponent
         return last.isEmpty ? app.name : last
+    }
+
+    var pendingImportTitle: String {
+        guard let pending = pendingImport else { return "Replace existing file?" }
+        return Self.importCollisionTitle(for: pending)
+    }
+
+    static func importCollisionTitle(for pending: PendingImportPrompt) -> String {
+        let files = pending.collidingFileNames
+        if files.count == 1 && pending.collidingFolderNames.isEmpty {
+            return "Replace “\(files[0])”?"
+        }
+        if !files.isEmpty {
+            return files.count == 1 ? "Replace existing file?" : "Replace \(files.count) files?"
+        }
+        return "Name already used"
+    }
+
+    static func importCollisionMessage(for pending: PendingImportPrompt) -> String {
+        var parts: [String] = []
+        if pending.collidingFileNames.count == 1 {
+            parts.append(
+                "A file with this name is already in this folder. Replace keeps the same location and name."
+            )
+        } else if pending.collidingFileNames.count > 1 {
+            let listed = quotedList(pending.collidingFileNames)
+            parts.append(
+                "\(listed) already exist in this folder. Replace keeps each original location and name."
+            )
+        }
+        if pending.collidingFolderNames.count == 1 {
+            parts.append(
+                "A folder named “\(pending.collidingFolderNames[0])” is already here. EscapeOS will not replace a folder with a file — Keep Both saves the import under a new name."
+            )
+        } else if pending.collidingFolderNames.count > 1 {
+            let listed = quotedList(pending.collidingFolderNames)
+            parts.append(
+                "Folders named \(listed) are already here. Those imports are saved under new names; a folder is never replaced with a file."
+            )
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private static func quotedList(_ names: [String]) -> String {
+        let shown = names.prefix(4)
+        let quoted = shown.map { "“\($0)”" }.joined(separator: ", ")
+        if names.count <= 4 { return quoted }
+        return "\(quoted), and \(names.count - 4) more"
     }
 
     func open(_ path: String) {
@@ -837,21 +910,67 @@ final class FileBrowserViewModel: ObservableObject {
 
     func importFiles(from urls: [URL]) {
         guard !urls.isEmpty else { return }
+        guard !isBusy, pendingImport == nil else { return }
         isZipping = true
         busyTitle = urls.count == 1 ? "Importing…" : "Importing \(urls.count) items…"
+        let destDir = currentPath
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let payloads = try Self.readImportPayloads(from: urls)
+                let outcome: PendingImportPrompt? = try self.escape.withHandle(for: self.app.containerPath) { _ in
+                    try Self.assertPath(destDir, under: self.app.containerPath)
+                    let plan = Self.collisionPlan(for: payloads, in: destDir, files: self.files)
+                    if plan.collidingFileNames.isEmpty && plan.collidingFolderNames.isEmpty {
+                        try self.writeImportPayloads(payloads, into: destDir, policy: .keepBoth)
+                        return nil
+                    }
+                    return PendingImportPrompt(
+                        destDir: destDir,
+                        payloads: payloads,
+                        collidingFileNames: plan.collidingFileNames,
+                        collidingFolderNames: plan.collidingFolderNames
+                    )
+                }
+                DispatchQueue.main.async {
+                    self.isZipping = false
+                    if let outcome = outcome {
+                        self.pendingImport = outcome
+                    } else {
+                        self.open(self.currentPath)
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isZipping = false
+                    self.operationError = IdentifiedError(message: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    func cancelPendingImport() {
+        pendingImport = nil
+    }
+
+    func finishPendingImport(_ pending: PendingImportPrompt, policy: ImportNamePolicy) {
+        guard policy != .cancel else {
+            pendingImport = nil
+            return
+        }
+        // Button actions can fire twice; the captured prompt is still valid the second time.
+        guard !isBusy else { return }
+        pendingImport = nil
+        isZipping = true
+        busyTitle = pending.payloads.count == 1 ? "Importing…" : "Importing \(pending.payloads.count) items…"
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 try self.escape.withHandle(for: self.app.containerPath) { _ in
-                    for url in urls {
-                        let accessing = url.startAccessingSecurityScopedResource()
-                        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                        let data = try Data(contentsOf: url)
-                        let dest = self.files.uniqueDestination(
-                            in: self.currentPath,
-                            preferredName: url.lastPathComponent
-                        )
-                        try self.files.writeFile(data: data, to: dest)
-                    }
+                    try Self.assertPath(pending.destDir, under: self.app.containerPath)
+                    try self.writeImportPayloads(
+                        pending.payloads,
+                        into: pending.destDir,
+                        policy: policy
+                    )
                 }
                 DispatchQueue.main.async {
                     self.isZipping = false
@@ -863,6 +982,85 @@ final class FileBrowserViewModel: ObservableObject {
                     self.operationError = IdentifiedError(message: error.localizedDescription)
                 }
             }
+        }
+    }
+
+    private static func readImportPayloads(from urls: [URL]) throws -> [ImportPayload] {
+        var payloads: [ImportPayload] = []
+        for url in urls {
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            if isDirectory {
+                throw FileServiceError.operationFailed(
+                    "“\(url.lastPathComponent)” is a folder. Import from Files picks files, not folders."
+                )
+            }
+            let data = try Data(contentsOf: url)
+            payloads.append(ImportPayload(name: url.lastPathComponent, data: data))
+        }
+        return payloads
+    }
+
+    private static func assertPath(_ path: String, under root: String) throws {
+        let dest = (path as NSString).standardizingPath
+        let base = (root as NSString).standardizingPath
+        guard dest == base || dest.hasPrefix(base + "/") else {
+            throw FileServiceError.operationFailed("That folder is outside this app's data.")
+        }
+    }
+
+    private static func collisionPlan(
+        for payloads: [ImportPayload],
+        in destDir: String,
+        files: FileService
+    ) -> (collidingFileNames: [String], collidingFolderNames: [String]) {
+        var filesSeen = Set<String>()
+        var foldersSeen = Set<String>()
+        var collidingFiles: [String] = []
+        var collidingFolders: [String] = []
+        for payload in payloads {
+            let dest = files.preferredDestination(in: destDir, preferredName: payload.name)
+            let name = (dest as NSString).lastPathComponent
+            switch files.existingKind(at: dest) {
+            case .none:
+                continue
+            case .file:
+                if filesSeen.insert(name).inserted {
+                    collidingFiles.append(name)
+                }
+            case .directory:
+                if foldersSeen.insert(name).inserted {
+                    collidingFolders.append(name)
+                }
+            }
+        }
+        return (collidingFiles, collidingFolders)
+    }
+
+    private func writeImportPayloads(
+        _ payloads: [ImportPayload],
+        into destDir: String,
+        policy: ImportNamePolicy
+    ) throws {
+        for payload in payloads {
+            let dest: String
+            switch policy {
+            case .cancel:
+                return
+            case .keepBoth:
+                dest = files.uniqueDestination(in: destDir, preferredName: payload.name)
+            case .replace:
+                let preferred = files.preferredDestination(in: destDir, preferredName: payload.name)
+                switch files.existingKind(at: preferred) {
+                case .directory:
+                    dest = files.uniqueDestination(in: destDir, preferredName: payload.name)
+                case .none, .file:
+                    dest = preferred
+                }
+            }
+            try Self.assertPath(dest, under: destDir)
+            try files.writeFile(data: payload.data, to: dest)
         }
     }
 
@@ -1063,6 +1261,21 @@ struct SharePayload: Identifiable {
 struct IdentifiedError: Identifiable {
     let id = UUID()
     let message: String
+}
+
+/// Bytes picked from Files, still named as the source file.
+struct ImportPayload {
+    let name: String
+    let data: Data
+}
+
+/// Import waiting on Replace / Keep Both / Cancel because names already exist.
+struct PendingImportPrompt: Identifiable {
+    let id = UUID()
+    let destDir: String
+    let payloads: [ImportPayload]
+    let collidingFileNames: [String]
+    let collidingFolderNames: [String]
 }
 
 struct ActivityShareView: UIViewControllerRepresentable {

@@ -21,6 +21,23 @@ struct FileItem: Identifiable, Hashable {
     var isDirectory: Bool { kind == .directory }
 }
 
+/// Occupant of a path, if any. Replacing a file is not the same as replacing a folder.
+enum ExistingItemKind {
+    case none
+    case file
+    case directory
+}
+
+/// How to land an imported name when that name is already in the folder.
+enum ImportNamePolicy {
+    /// Overwrite a same-named file. A same-named folder is kept as a copy.
+    case replace
+    /// Land beside the existing name (`foo 2.txt`).
+    case keepBoth
+    /// Write nothing.
+    case cancel
+}
+
 /// Errors surfaced by file operations.
 enum FileServiceError: Error, LocalizedError {
     case pathNotFound(String)
@@ -56,6 +73,18 @@ final class FileService {
         var isDir: ObjCBool = false
         let exists = fm.fileExists(atPath: path, isDirectory: &isDir)
         return exists && isDir.boolValue
+    }
+
+    /// What already occupies `path`, if anything. A file and a folder are not interchangeable.
+    /// Uses `attributesOfItem` so a symlink is classified as a file (the link), not its target.
+    func existingKind(at path: String) -> ExistingItemKind {
+        guard let type = (try? fm.attributesOfItem(atPath: path))?[.type] as? FileAttributeType else {
+            return fm.fileExists(atPath: path) ? .file : .none
+        }
+        if type == FileAttributeType.typeDirectory {
+            return .directory
+        }
+        return .file
     }
 
     func attributes(at path: String) throws -> [FileAttributeKey: Any] {
@@ -154,7 +183,19 @@ final class FileService {
             if !fm.fileExists(atPath: parent) {
                 try fm.createDirectory(atPath: parent, withIntermediateDirectories: true)
             }
+            // attributesOfItem does not follow a symlink. fileExists(isDirectory:) does,
+            // which would let an atomic write land on a target outside `parent`.
+            if let type = (try? fm.attributesOfItem(atPath: path))?[.type] as? FileAttributeType {
+                if type == FileAttributeType.typeDirectory {
+                    throw FileServiceError.operationFailed("A folder already exists at \(path)")
+                }
+                if type == FileAttributeType.typeSymbolicLink {
+                    try fm.removeItem(atPath: path)
+                }
+            }
             try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        } catch let e as FileServiceError {
+            throw e
         } catch {
             throw mapError(error, path: path)
         }
@@ -254,24 +295,27 @@ final class FileService {
         return skipped
     }
 
-    /// Next unused path in `directory` for `preferredName` (`foo.txt` → `foo 2.txt`).
+    /// Sanitized path in `directory` for `preferredName`, even if that path already exists.
     /// Uses only the last path component so `/abs` or `../x` cannot leave `directory`.
-    func uniqueDestination(in directory: String, preferredName: String) -> String {
+    func preferredDestination(in directory: String, preferredName: String) -> String {
         let leaf = (preferredName as NSString).lastPathComponent
-        let preferredName = FileNameRules.sanitize(leaf) ?? "extracted"
-        let ns = preferredName as NSString
+        let name = FileNameRules.sanitize(leaf) ?? "extracted"
+        return (directory as NSString).appendingPathComponent(name)
+    }
+
+    /// Next unused path in `directory` for `preferredName` (`foo.txt` → `foo 2.txt`).
+    /// First choice is `preferredDestination`; numbering matches that same leaf.
+    func uniqueDestination(in directory: String, preferredName: String) -> String {
+        let preferred = preferredDestination(in: directory, preferredName: preferredName)
+        if !exists(at: preferred) {
+            return preferred
+        }
+        let ns = (preferred as NSString).lastPathComponent as NSString
         let base = ns.deletingPathExtension
         let ext = ns.pathExtension
-        var index = 1
+        var index = 2
         while true {
-            let name: String
-            if index == 1 {
-                name = preferredName
-            } else if ext.isEmpty {
-                name = "\(base) \(index)"
-            } else {
-                name = "\(base) \(index).\(ext)"
-            }
+            let name = ext.isEmpty ? "\(base) \(index)" : "\(base) \(index).\(ext)"
             let candidate = (directory as NSString).appendingPathComponent(name)
             if !exists(at: candidate) {
                 return candidate

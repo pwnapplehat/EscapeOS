@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.6] - 2026-09-18
+
+Production IPA after 0.1.5.
+
+### Changed
+
+- **Import from Files** asks **Replace**, **Keep Both**, or **Cancel** when that name is already in the folder, instead of silently writing `foo 2.txt`. Replace overwrites the existing file at the same path. A same-named **folder** is never replaced with a file (Keep Both lands beside it). https://github.com/pwnapplehat/EscapeOS/issues/2
+
 ## [0.1.5] - 2026-08-17
 
 Production IPA after 0.1.4. Hardware-checked on iPhone 17, iOS 26.5.1 (list, browse, Reclaim skip-on-denied, Reset App Data).
