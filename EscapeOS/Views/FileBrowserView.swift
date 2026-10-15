@@ -19,6 +19,7 @@ struct FileBrowserView: View {
     @State private var selecting = false
     @State private var selected = Set<String>()
     @State private var pendingDelete: [FileItem] = []
+    @AppStorage(DeleteConfirmation.preferenceKey) private var confirmFileDeletes = true
     @State private var archivePassword = ""
     @State private var showImportCollision = false
 
@@ -209,7 +210,7 @@ struct FileBrowserView: View {
                 renameItem = nil
             }
         }
-        .alert(deleteTitle, isPresented: Binding(
+        .alert(deletePrompt.title, isPresented: Binding(
             get: { !pendingDelete.isEmpty },
             set: { if !$0 { pendingDelete = [] } }
         )) {
@@ -219,8 +220,16 @@ struct FileBrowserView: View {
                 selected.subtract(pendingDelete.map(\.path))
                 pendingDelete = []
             }
+            if deletePrompt.offersDontAskAgain {
+                Button("Delete, Don’t Ask Again", role: .destructive) {
+                    confirmFileDeletes = false
+                    vm.delete(items: pendingDelete)
+                    selected.subtract(pendingDelete.map(\.path))
+                    pendingDelete = []
+                }
+            }
         } message: {
-            Text("This cannot be undone. Close the target app first if the file might be in use.")
+            Text(deletePrompt.message)
         }
         .alert(
             vm.pendingImportTitle,
@@ -281,11 +290,8 @@ struct FileBrowserView: View {
         return n == 1 ? "1 Selected" : "\(n) Selected"
     }
 
-    private var deleteTitle: String {
-        let items = pendingDelete
-        if items.count == 1 { return "Delete \(items[0].name)?" }
-        if items.isEmpty { return "Delete?" }
-        return "Delete \(items.count) items?"
+    private var deletePrompt: DeletePrompt {
+        DeleteConfirmation.prompt(for: pendingDelete)
     }
 
     private var fileList: some View {
@@ -346,10 +352,11 @@ struct FileBrowserView: View {
         requestDelete(offsets.compactMap { $0 < snapshot.count ? snapshot[$0] : nil })
     }
 
-    /// Files delete immediately. Folders still confirm — that’s harder to undo.
+    /// Folders always confirm. Files confirm too, unless the person chose "Don’t Ask Again"
+    /// (Settings turns it back on).
     private func requestDelete(_ items: [FileItem]) {
         guard !items.isEmpty else { return }
-        if items.contains(where: \.isDirectory) {
+        if DeleteConfirmation.needsPrompt(for: items, confirmFileDeletes: confirmFileDeletes) {
             pendingDelete = items
             return
         }
@@ -831,6 +838,14 @@ final class FileBrowserViewModel: ObservableObject {
         }
         if clip.containerPath == destContainer {
             try escape.withHandle(for: destContainer) { _ in
+                if clip.mode == .copy {
+                    try SpaceCheck.require(
+                        self.files.totalBytes(of: clip.items),
+                        at: destDir,
+                        for: "paste these items",
+                        files: self.files
+                    )
+                }
                 try self.transferSameContainer(clip, destDir: destDir)
             }
             return
@@ -841,7 +856,10 @@ final class FileBrowserViewModel: ObservableObject {
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: staging) }
 
+        var stagedBytes: Int64 = 0
         try escape.withHandle(for: clip.containerPath) { _ in
+            stagedBytes = self.files.totalBytes(of: clip.items)
+            try SpaceCheck.require(stagedBytes, at: staging.path, for: "paste these items", files: self.files)
             for item in clip.items {
                 try self.files.copyItem(
                     at: item.path,
@@ -850,6 +868,8 @@ final class FileBrowserViewModel: ObservableObject {
             }
         }
         try escape.withHandle(for: destContainer) { _ in
+            // The staged copy already occupies space, so the landing copy needs the same again.
+            try SpaceCheck.require(stagedBytes, at: destDir, for: "paste these items", files: self.files)
             for item in clip.items {
                 let dest = self.files.uniqueDestination(in: destDir, preferredName: item.name)
                 try self.files.copyItem(
@@ -896,6 +916,14 @@ final class FileBrowserViewModel: ObservableObject {
     func duplicate(items: [FileItem]) {
         guard !items.isEmpty else { return }
         mutate {
+            if let first = items.first {
+                try SpaceCheck.require(
+                    self.files.totalBytes(of: items),
+                    at: (first.path as NSString).deletingLastPathComponent,
+                    for: "duplicate these items",
+                    files: self.files
+                )
+            }
             for item in items {
                 let parent = (item.path as NSString).deletingLastPathComponent
                 let ns = item.name as NSString
@@ -1041,6 +1069,12 @@ final class FileBrowserViewModel: ObservableObject {
         into destDir: String,
         policy: ImportNamePolicy
     ) throws {
+        try SpaceCheck.require(
+            payloads.reduce(into: Int64(0)) { $0 += Int64($1.data.count) },
+            at: destDir,
+            for: payloads.count == 1 ? "import this file" : "import these files",
+            files: files
+        )
         for payload in payloads {
             let dest: String
             switch policy {
@@ -1070,6 +1104,12 @@ final class FileBrowserViewModel: ObservableObject {
             do {
                 let dest = try Self.shareStagingURL(named: Self.shareName(for: item))
                 try self.escape.withHandle(for: self.app.containerPath) { _ in
+                    try SpaceCheck.require(
+                        self.files.totalBytes(of: [item]),
+                        at: dest.deletingLastPathComponent().path,
+                        for: "prepare this for sharing",
+                        files: self.files
+                    )
                     if item.isDirectory {
                         let zip = ZipWriter()
                         try zip.begin(at: dest)
@@ -1106,6 +1146,14 @@ final class FileBrowserViewModel: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 let destPath: String = try self.escape.withHandle(for: self.app.containerPath) { _ in
+                    // Raw size is the worst case (already-compressed data barely shrinks); checking it
+                    // up front beats failing after a long wait.
+                    try SpaceCheck.require(
+                        self.files.totalBytes(of: items),
+                        at: self.currentPath,
+                        for: items.count == 1 ? "compress this item" : "compress these items",
+                        files: self.files
+                    )
                     let dest = self.files.uniqueDestination(
                         in: self.currentPath,
                         preferredName: Self.zipName(for: items)

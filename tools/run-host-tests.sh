@@ -13,7 +13,10 @@ SW="${THEOS:-$HOME/theos}/toolchain/linux/host/bin"
   export LD_LIBRARY_PATH="$HOME/swift-compat/root/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
-SOURCES=("$ROOT"/Tests/HostTests/*.swift "$ROOT/EscapeOS/Engine/FileKind.swift" "$ROOT/EscapeOS/Engine/FileService.swift")
+SOURCES=("$ROOT"/Tests/HostTests/*.swift "$ROOT/EscapeOS/Engine/FileKind.swift" "$ROOT/EscapeOS/Engine/FileService.swift"
+         "$ROOT/EscapeOS/Engine/DeleteConfirmation.swift"
+         "$ROOT/EscapeOS/Engine/SpaceCheck.swift"
+         "$ROOT/EscapeOS/Engine/PasteConflicts.swift")
 SOURCES+=("$@")
 "$SW/swiftc" -O -o "$OUT/host-tests" "${SOURCES[@]}" 2>&1 | grep -v "protected function" || true
 [ -x "$OUT/host-tests" ] || { echo "COMPILE FAILED"; exit 1; }

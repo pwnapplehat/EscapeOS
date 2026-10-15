@@ -30,6 +30,9 @@ EscapeOS_FILES = \
 	EscapeOS/Engine/FileKind.swift \
 	EscapeOS/Engine/FileClipboard.swift \
 	EscapeOS/Engine/FileService.swift \
+	EscapeOS/Engine/DeleteConfirmation.swift \
+	EscapeOS/Engine/SpaceCheck.swift \
+	EscapeOS/Engine/PasteConflicts.swift \
 	EscapeOS/Engine/AppDiscovery.swift \
 	EscapeOS/Engine/BackupService.swift \
 	EscapeOS/Engine/ZipWriter.swift \

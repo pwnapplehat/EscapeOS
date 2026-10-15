@@ -45,6 +45,8 @@ enum FileServiceError: Error, LocalizedError {
     case notDirectory(String)
     case notRegularFile(String)
     case operationFailed(String)
+    /// The operation would not fit on disk. The message is complete and shown as-is.
+    case insufficientSpace(String)
 
     var errorDescription: String? {
         switch self {
@@ -53,6 +55,7 @@ enum FileServiceError: Error, LocalizedError {
         case .notDirectory(let p): return "Not a directory: \(p)"
         case .notRegularFile(let p): return "Not a regular file: \(p)"
         case .operationFailed(let m): return "Operation failed: \(m)"
+        case .insufficientSpace(let m): return m
         }
     }
 }

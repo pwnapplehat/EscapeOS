@@ -4,6 +4,8 @@ import SwiftUI
 struct BackupsListView: View {
     @ObservedObject var appList: AppListViewModel
     @StateObject private var vm = BackupsListViewModel()
+    @State private var pendingBackupDelete: [BackupRecord] = []
+    @State private var sharePayload: SharePayload?
 
     var body: some View {
         Group {
@@ -42,13 +44,18 @@ struct BackupsListView: View {
                         BackupRow(
                             record: record,
                             icon: appList.icons[record.metadata.bundleIdentifier],
-                            eligibility: vm.eligibility(for: record, apps: appList.apps)
-                        ) {
-                            vm.beginRestore(record: record, apps: appList.apps)
-                        }
+                            eligibility: vm.eligibility(for: record, apps: appList.apps),
+                            onRestore: {
+                                vm.beginRestore(record: record, apps: appList.apps)
+                            },
+                            onShare: {
+                                sharePayload = SharePayload(url: record.archiveURL)
+                            }
+                        )
                     }
                     .onDelete { offsets in
-                        vm.delete(at: offsets)
+                        // Deleting an archive cannot be undone, so it asks first.
+                        pendingBackupDelete = offsets.compactMap { $0 < vm.records.count ? vm.records[$0] : nil }
                     }
                 }
                 .listStyle(.insetGrouped)
@@ -74,6 +81,28 @@ struct BackupsListView: View {
         .alert(item: $vm.alertError) { error in
             Alert(title: Text("Could Not Start Restore"), message: Text(error.message), dismissButton: .default(Text("OK")))
         }
+        .alert(backupDeleteTitle, isPresented: Binding(
+            get: { !pendingBackupDelete.isEmpty },
+            set: { if !$0 { pendingBackupDelete = [] } }
+        )) {
+            Button("Cancel", role: .cancel) { pendingBackupDelete = [] }
+            Button("Delete", role: .destructive) {
+                vm.delete(records: pendingBackupDelete)
+                pendingBackupDelete = []
+            }
+        } message: {
+            Text("The backup archive is permanently deleted from this device. This can’t be undone. Use Share / Save to Files first if you want to keep a copy.")
+        }
+        .sheet(item: $sharePayload) { payload in
+            ActivityShareView(url: payload.url)
+        }
+    }
+
+    private var backupDeleteTitle: String {
+        if pendingBackupDelete.count == 1, let only = pendingBackupDelete.first {
+            return "Delete the backup of “\(only.displayTitle)”?"
+        }
+        return pendingBackupDelete.isEmpty ? "Delete backup?" : "Delete \(pendingBackupDelete.count) backups?"
     }
 }
 
@@ -82,6 +111,7 @@ private struct BackupRow: View {
     let icon: UIImage?
     let eligibility: RestoreEligibility
     let onRestore: () -> Void
+    let onShare: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -124,6 +154,16 @@ private struct BackupRow: View {
                     .font(.footnote)
                     .foregroundColor(.red)
             }
+
+            Button(action: onShare) {
+                HStack(spacing: 8) {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("Share / Save to Files")
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
         }
         .padding(.vertical, 6)
     }
@@ -362,12 +402,12 @@ final class BackupsListViewModel: ObservableObject {
         }
     }
 
-    func delete(at offsets: IndexSet) {
-        let targets = offsets.map { records[$0] }
+    func delete(records targets: [BackupRecord]) {
+        let ids = Set(targets.map(\.id))
         for record in targets {
             try? catalog.delete(record: record)
         }
-        records.remove(atOffsets: offsets)
+        records.removeAll { ids.contains($0.id) }
     }
 }
 

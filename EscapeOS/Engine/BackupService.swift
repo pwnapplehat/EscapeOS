@@ -21,6 +21,8 @@ enum BackupError: Error, LocalizedError {
     case invalidArchive(String)
     case restoreBlocked(String)
     case appNotInstalled(String)
+    /// The archive would not fit on disk. The message is complete and shown as-is.
+    case insufficientSpace(String)
 
     var errorDescription: String? {
         switch self {
@@ -30,6 +32,7 @@ enum BackupError: Error, LocalizedError {
         case .invalidArchive(let m): return "Invalid backup archive: \(m)"
         case .restoreBlocked(let m): return m
         case .appNotInstalled(let id): return "App is not installed: \(id)"
+        case .insufficientSpace(let m): return m
         }
     }
 }
@@ -76,6 +79,23 @@ final class BackupService {
 
         do {
             try escape.withHandle(for: app.containerPath) { _ in
+                // Sizes are cheap to read and the archive can be as large as the data it holds,
+                // so check before writing anything. The walk refuses more than maxTotalBytes
+                // anyway, so that is the most this can need.
+                var needed: Int64 = 0
+                for root in Self.backupRoots {
+                    let rootPath = (app.containerPath as NSString).appendingPathComponent(root)
+                    if files.isDirectory(at: rootPath) { needed += files.treeBytes(at: rootPath) }
+                }
+                needed = min(needed, maxTotalBytes)
+                if case .notEnough(let need, let available) = SpaceCheck.verdict(
+                    needed: needed,
+                    available: files.availableCapacity(at: backupsDir.path)
+                ) {
+                    throw BackupError.insufficientSpace(
+                        SpaceCheck.message(for: "back up this app", needed: need, available: available)
+                    )
+                }
                 var foundRoot = false
                 for root in Self.backupRoots {
                     if isCancelled() { throw BackupError.cancelled }

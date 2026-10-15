@@ -283,6 +283,7 @@ struct EmptyStateView: View {
 struct SettingsForm: View {
     var onResetPairing: () -> Void
     @AppStorage("TunnelDeviceIP") private var tunnelIP: String = "10.7.0.1"
+    @AppStorage(DeleteConfirmation.preferenceKey) private var confirmFileDeletes = true
 
     var body: some View {
         Form {
@@ -291,6 +292,10 @@ struct SettingsForm: View {
                     .keyboardType(.numbersAndPunctuation)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
+            }
+
+            Section(header: Text("Deleting"), footer: Text("Folders always ask first, because they take everything inside them.")) {
+                Toggle("Confirm before deleting files", isOn: $confirmFileDeletes)
             }
 
             Section {
