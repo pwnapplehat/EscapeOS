@@ -1003,9 +1003,7 @@ final class FileBrowserViewModel: ObservableObject {
     }
 
     private static func assertPath(_ path: String, under root: String) throws {
-        let dest = (path as NSString).standardizingPath
-        let base = (root as NSString).standardizingPath
-        guard dest == base || dest.hasPrefix(base + "/") else {
+        guard PathContainment.isInside(path, root: root) else {
             throw FileServiceError.operationFailed("That folder is outside this app's data.")
         }
     }

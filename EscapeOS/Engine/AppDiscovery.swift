@@ -21,6 +21,13 @@ enum AppDiscoveryError: LocalizedError {
         case .noPairingFile:
             return "No pairing file imported. Pairing is required to list apps on-device."
         case .heartbeatFailed(let m):
+            // lockdownd answers InvalidHostID when the pairing file's host is not in the
+            // device's trusted list: the file is stale, belongs to another device, or trust
+            // was reset. LocalDevVPN is working in that case, so the generic network advice
+            // below would send people the wrong way.
+            if m.range(of: "InvalidHostID", options: .caseInsensitive) != nil {
+                return "This device does not recognise EscapeOS's pairing file (InvalidHostID), so it refused the connection. The file is out of date, was made for a different device, or this device's trust list was reset. Place a fresh pairing file with iPASide (Settings, Pairing file, Place), or import the one your other sideloading app uses, then tap Retry."
+            }
             return "Could not connect to the local tunnel: \(m). Enable LocalDevVPN on its default 10.7.0.1 IPs, stay on Wi-Fi, and use a pairing file from iPASide."
         case .enumerationFailed(let m):
             return "Failed to enumerate apps: \(m)"

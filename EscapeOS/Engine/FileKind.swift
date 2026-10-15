@@ -102,6 +102,46 @@ enum FileNameRules {
     }
 }
 
+/// Decides whether a path lies inside a folder by comparing path components only.
+///
+/// `NSString.standardizingPath` is not safe for this. It drops a leading `/private` only when
+/// the result exists on disk, so a folder that exists is normalized to `/var/...` while a file
+/// that is about to be created keeps `/private/var/...`, and `hasPrefix` then rejects a path
+/// that is plainly inside the folder. App containers are reported as `/private/var/mobile/...`,
+/// which is how adding a new file and "Keep Both" failed with "outside this app's data".
+/// Nothing here touches the file system, so the answer cannot depend on what exists.
+enum PathContainment {
+    /// `/private/var`, `/private/tmp` and `/private/etc` are the same folders as `/var`, `/tmp`
+    /// and `/etc`; the leading `private` is dropped for those by name.
+    private static let privateAliases: Set<String> = ["var", "tmp", "etc"]
+
+    static func components(of path: String) -> [String] {
+        var parts: [String] = []
+        for part in path.split(separator: "/", omittingEmptySubsequences: true) {
+            switch part {
+            case ".":
+                continue
+            case "..":
+                if !parts.isEmpty { parts.removeLast() }
+            default:
+                parts.append(String(part))
+            }
+        }
+        if parts.count > 1, parts[0] == "private", privateAliases.contains(parts[1]) {
+            parts.removeFirst()
+        }
+        return parts
+    }
+
+    /// True when `path` is `root` itself or somewhere beneath it.
+    static func isInside(_ path: String, root: String) -> Bool {
+        let base = components(of: root)
+        guard !base.isEmpty else { return false }
+        let target = components(of: path)
+        return target.count >= base.count && Array(target.prefix(base.count)) == base
+    }
+}
+
 /// Resolves an archive member name under `destDir`. Rejects `..` and paths that escape the folder.
 enum ArchiveEntryPath {
     static func resolve(_ entryName: String, under destDir: String) throws -> (path: String, isDirectory: Bool) {

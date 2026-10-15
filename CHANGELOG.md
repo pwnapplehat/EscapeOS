@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.7] - 2026-10-15
+
+Bug-fix release after 0.1.6.
+
+### Fixed
+
+- **Import from Files no longer fails with "That folder is outside this app's data."** Since 0.1.6, adding a file whose name was not already in the folder, and the **Keep Both** choice, both failed with that message; only **Replace** worked. The folder check compared paths with `standardizingPath`, which drops a leading `/private` only when the path exists on disk. An app's container is reported under `/private/var/...`, so the existing folder and the not-yet-created file were normalized differently and the file looked outside its own folder. The check now compares path components without touching the file system, and still rejects `..` escapes, sibling folders and other apps. https://github.com/pwnapplehat/EscapeOS/issues/4
+- **"Could not connect to the local tunnel ... InvalidHostID" now says what is wrong.** `InvalidHostID` means the device does not recognise EscapeOS's pairing file (out of date, made for another device, or trust was reset). The message used to tell people to check LocalDevVPN and Wi-Fi, which was not the problem. It now says to place a fresh pairing file with iPASide or import the one the other sideloading app uses. https://github.com/pwnapplehat/EscapeOS/issues/5
+
 ## [0.1.6] - 2026-09-18
 
 Production IPA after 0.1.5.
