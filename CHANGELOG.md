@@ -1,13 +1,30 @@
 # Changelog
 
-## [0.1.7] - 2026-10-15
+## [0.1.8] - 2026-10-15
 
-Bug-fix release after 0.1.6.
+Release after 0.1.6. 0.1.7 was never published; its two fixes are included here, together with features built from the requests in https://github.com/pwnapplehat/EscapeOS/issues/3 and https://github.com/pwnapplehat/EscapeOS/issues/4.
 
 ### Fixed
 
 - **Import from Files no longer fails with "That folder is outside this app's data."** Since 0.1.6, adding a file whose name was not already in the folder, and the **Keep Both** choice, both failed with that message; only **Replace** worked. The folder check compared paths with `standardizingPath`, which drops a leading `/private` only when the path exists on disk. An app's container is reported under `/private/var/...`, so the existing folder and the not-yet-created file were normalized differently and the file looked outside its own folder. The check now compares path components without touching the file system, and still rejects `..` escapes, sibling folders and other apps. https://github.com/pwnapplehat/EscapeOS/issues/4
 - **"Could not connect to the local tunnel ... InvalidHostID" now says what is wrong.** `InvalidHostID` means the device does not recognise EscapeOS's pairing file (out of date, made for another device, or trust was reset). The message used to tell people to check LocalDevVPN and Wi-Fi, which was not the problem. It now says to place a fresh pairing file with iPASide or import the one the other sideloading app uses. https://github.com/pwnapplehat/EscapeOS/issues/5
+
+### Added
+
+- **Search Whole App.** The **+** menu in any folder now has **Search Whole App**, which looks for a file or folder name anywhere in that app's data, not just the folder on screen. Every word you type must appear in the name; case and accents are ignored. Results are shown shallowest first, tap one to open the file or jump to the folder. It follows no symlinks, stops at 500 matches or 150,000 items, and can be cancelled.
+- **Favorites.** Long-press a file or folder and choose **Add to Favorites**, or use **Add Folder to Favorites** in the **+** menu. Favorites are listed at the top of the Apps tab and open in one tap. If an app is reinstalled (its data folder changes), favorites still open at the same place inside it. Swipe a favorite to remove it.
+- **Share / Save to Files** on every backup in the Backups tab, so an archive can be sent or saved outside the app.
+- **Replace / Keep Both / Cancel when pasting.** Pasting a file whose name already exists in the folder, in the same app or across apps, now asks instead of silently saving `name 2`. Replace is only offered for a file over a file: a folder is never replaced, a folder never replaces a file, and an item is never replaced by itself. Replacing copies to a hidden temporary name first and swaps it in with one atomic rename, so a failure leaves the existing file as it was.
+- **Free-space check before large work.** Compress, Share Zip, Duplicate, Paste, Import from Files and Backup now check how much room they need before they start and stop with a clear "Not enough free space" message that says how much is needed and how much is free, instead of failing after a long wait.
+
+### Changed
+
+- **Deleting a file now asks first.** Until now only folders asked; a file was deleted the instant Delete was tapped or swiped. The confirmation names exactly what will be deleted. **Delete, Don’t Ask Again** is offered for files for people who find the prompt slow, and **Settings → Confirm before deleting files** turns it back on. Folders always ask.
+- **Deleting a backup archive asks first** and says it cannot be undone.
+
+### Not in this release
+
+SQLite editor, selective backup and restore of single files, drag and drop from Files, a trash with restore, an operation queue and progress for every operation are tracked as separate issues.
 
 ## [0.1.6] - 2026-09-18
 

@@ -22,6 +22,10 @@ struct FileBrowserView: View {
     @AppStorage(DeleteConfirmation.preferenceKey) private var confirmFileDeletes = true
     @State private var archivePassword = ""
     @State private var showImportCollision = false
+    @State private var showPasteCollision = false
+    @State private var showAppSearch = false
+    @State private var jumpFolder: String?
+    @ObservedObject private var favorites = FavoritesModel.shared
 
     init(app: InstalledApp) {
         self.app = app
@@ -107,6 +111,20 @@ struct FileBrowserView: View {
                             Label("Import from Files", systemImage: "square.and.arrow.down")
                         }
                         .disabled(vm.isBusy || vm.pendingImport != nil)
+                        Button {
+                            showAppSearch = true
+                        } label: {
+                            Label("Search Whole App", systemImage: "magnifyingglass")
+                        }
+                        Button {
+                            favorites.toggle(app: app, item: currentFolderItem)
+                        } label: {
+                            if favorites.isFavorite(app: app, path: vm.currentPath) {
+                                Label("Remove Folder from Favorites", systemImage: "star.slash")
+                            } else {
+                                Label("Add Folder to Favorites", systemImage: "star")
+                            }
+                        }
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -138,18 +156,32 @@ struct FileBrowserView: View {
         }
         .onAppear { vm.open(vm.currentPath) }
         .background(
-            NavigationLink(
-                destination: Group {
-                    if let request = openRequest {
-                        FileViewerView(app: app, item: request.item, mode: request.mode)
-                    }
-                },
-                isActive: Binding(
-                    get: { openRequest != nil },
-                    set: { if !$0 { openRequest = nil } }
-                )
-            ) { EmptyView() }
-            .hidden()
+            ZStack {
+                NavigationLink(
+                    destination: Group {
+                        if let request = openRequest {
+                            FileViewerView(app: app, item: request.item, mode: request.mode)
+                        }
+                    },
+                    isActive: Binding(
+                        get: { openRequest != nil },
+                        set: { if !$0 { openRequest = nil } }
+                    )
+                ) { EmptyView() }
+                .hidden()
+                NavigationLink(
+                    destination: Group {
+                        if let folder = jumpFolder {
+                            FileBrowserView(app: app, initialPath: folder)
+                        }
+                    },
+                    isActive: Binding(
+                        get: { jumpFolder != nil },
+                        set: { if !$0 { jumpFolder = nil } }
+                    )
+                ) { EmptyView() }
+                .hidden()
+            }
         )
         .sheet(item: $vm.sharePayload) { payload in
             ActivityShareView(url: payload.url)
@@ -253,8 +285,35 @@ struct FileBrowserView: View {
         .onChange(of: vm.pendingImport?.id) { _ in
             showImportCollision = vm.pendingImport != nil
         }
+        .alert(
+            vm.pendingPasteTitle,
+            isPresented: $showPasteCollision,
+            presenting: vm.pendingPaste
+        ) { choice in
+            Button("Cancel", role: .cancel) {
+                vm.cancelPendingPaste()
+            }
+            Button("Keep Both") {
+                vm.finishPendingPaste(choice, policy: .keepBoth)
+            }
+            if choice.plan.canReplace {
+                Button("Replace", role: .destructive) {
+                    vm.finishPendingPaste(choice, policy: .replace)
+                }
+            }
+        } message: { choice in
+            Text(PasteConflictPlanner.message(for: choice.plan))
+        }
+        .onChange(of: vm.pendingPaste?.id) { _ in
+            showPasteCollision = vm.pendingPaste != nil
+        }
         .sheet(item: $propertiesItem) { item in
             FilePropertiesView(app: app, item: item)
+        }
+        .sheet(isPresented: $showAppSearch) {
+            AppSearchView(app: app) { hit in
+                openSearchHit(hit)
+            }
         }
         .fileImporter(
             isPresented: $showImporter,
@@ -278,6 +337,28 @@ struct FileBrowserView: View {
 
     private var selectedItems: [FileItem] {
         visibleItems.filter { selected.contains($0.path) }
+    }
+
+    /// The folder on screen, as an item, so it can be saved as a favorite.
+    private var currentFolderItem: FileItem {
+        FileItem(
+            name: vm.displayTitle,
+            path: vm.currentPath,
+            kind: .directory,
+            size: 0,
+            modified: nil,
+            isReadable: true,
+            isWritable: true
+        )
+    }
+
+    /// A search result opens the folder, or the file in the viewer.
+    private func openSearchHit(_ hit: SearchHit) {
+        if hit.item.isDirectory {
+            jumpFolder = hit.item.path
+        } else {
+            openRequest = OpenRequest(item: hit.item, mode: .auto)
+        }
     }
 
     private var allVisibleSelected: Bool {
@@ -578,6 +659,15 @@ struct FileBrowserView: View {
             } label: {
                 Label("Rename", systemImage: "pencil")
             }
+            Button {
+                favorites.toggle(app: app, item: item)
+            } label: {
+                if favorites.isFavorite(app: app, path: item.path) {
+                    Label("Remove from Favorites", systemImage: "star.slash")
+                } else {
+                    Label("Add to Favorites", systemImage: "star")
+                }
+            }
             Button(role: .destructive) {
                 requestDelete([item])
             } label: {
@@ -590,6 +680,15 @@ struct FileBrowserView: View {
 enum CreateKind {
     case file
     case folder
+}
+
+/// A paste that is waiting for the person to choose Replace, Keep Both or Cancel.
+struct PendingPasteChoice: Identifiable {
+    let id = UUID()
+    let clip: FileClipboard.Payload
+    let destDir: String
+    let destContainer: String
+    let plan: PastePlan
 }
 
 private struct OpenRequest: Identifiable {
@@ -671,6 +770,7 @@ final class FileBrowserViewModel: ObservableObject {
     @Published var unzipPasswordItem: FileItem?
     @Published var unzipPasswordMessage = "This archive is password-protected. Enter the password to extract it."
     @Published var pendingImport: PendingImportPrompt?
+    @Published var pendingPaste: PendingPasteChoice?
 
     var isBusy: Bool { isZipping || isExporting || isPasting }
 
@@ -690,6 +790,11 @@ final class FileBrowserViewModel: ObservableObject {
     var displayTitle: String {
         let last = (currentPath as NSString).lastPathComponent
         return last.isEmpty ? app.name : last
+    }
+
+    var pendingPasteTitle: String {
+        guard let choice = pendingPaste else { return "Replace existing file?" }
+        return PasteConflictPlanner.title(for: choice.plan)
     }
 
     var pendingImportTitle: String {
@@ -807,20 +912,38 @@ final class FileBrowserViewModel: ObservableObject {
 
     func paste() {
         guard let clip = FileClipboard.shared.payload, !clip.items.isEmpty else { return }
+        guard !isPasting, pendingPaste == nil else { return }
         isPasting = true
         busyTitle = "Pasting…"
         let destDir = currentPath
         let destContainer = app.containerPath
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                try self.paste(clip, into: destDir, destContainer: destContainer)
-                DispatchQueue.main.async {
-                    self.isPasting = false
-                    if clip.mode == .cut {
-                        FileClipboard.shared.clear()
-                    }
-                    self.open(self.currentPath)
+                for item in clip.items where Self.wouldNest(source: item.path, inside: destDir) {
+                    throw FileServiceError.operationFailed("Can't paste a folder into itself.")
                 }
+                // Ask before a pasted name lands on one that exists, the way Import from Files does.
+                let plan = try self.escape.withHandle(for: destContainer) { _ in
+                    PasteConflictPlanner.plan(
+                        items: clip.items,
+                        into: destDir,
+                        moving: clip.mode == .cut,
+                        files: self.files
+                    )
+                }
+                if plan.hasConflicts {
+                    DispatchQueue.main.async {
+                        self.isPasting = false
+                        self.pendingPaste = PendingPasteChoice(
+                            clip: clip,
+                            destDir: destDir,
+                            destContainer: destContainer,
+                            plan: plan
+                        )
+                    }
+                    return
+                }
+                self.runPaste(clip, into: destDir, destContainer: destContainer, policy: .keepBoth)
             } catch {
                 DispatchQueue.main.async {
                     self.isPasting = false
@@ -830,7 +953,55 @@ final class FileBrowserViewModel: ObservableObject {
         }
     }
 
-    private func paste(_ clip: FileClipboard.Payload, into destDir: String, destContainer: String) throws {
+    func cancelPendingPaste() {
+        pendingPaste = nil
+    }
+
+    func finishPendingPaste(_ choice: PendingPasteChoice, policy: ImportNamePolicy) {
+        guard policy != .cancel else {
+            pendingPaste = nil
+            return
+        }
+        // Button actions can fire twice; the captured choice is still valid the second time.
+        guard !isPasting else { return }
+        pendingPaste = nil
+        isPasting = true
+        busyTitle = "Pasting…"
+        DispatchQueue.global(qos: .userInitiated).async {
+            self.runPaste(choice.clip, into: choice.destDir, destContainer: choice.destContainer, policy: policy)
+        }
+    }
+
+    /// Runs on the calling background queue; reports back on the main queue.
+    private func runPaste(
+        _ clip: FileClipboard.Payload,
+        into destDir: String,
+        destContainer: String,
+        policy: ImportNamePolicy
+    ) {
+        do {
+            try paste(clip, into: destDir, destContainer: destContainer, policy: policy)
+            DispatchQueue.main.async {
+                self.isPasting = false
+                if clip.mode == .cut {
+                    FileClipboard.shared.clear()
+                }
+                self.open(self.currentPath)
+            }
+        } catch {
+            DispatchQueue.main.async {
+                self.isPasting = false
+                self.operationError = IdentifiedError(message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func paste(
+        _ clip: FileClipboard.Payload,
+        into destDir: String,
+        destContainer: String,
+        policy: ImportNamePolicy
+    ) throws {
         for item in clip.items {
             if Self.wouldNest(source: item.path, inside: destDir) {
                 throw FileServiceError.operationFailed("Can't paste a folder into itself.")
@@ -846,7 +1017,7 @@ final class FileBrowserViewModel: ObservableObject {
                         files: self.files
                     )
                 }
-                try self.transferSameContainer(clip, destDir: destDir)
+                try self.transferSameContainer(clip, destDir: destDir, policy: policy)
             }
             return
         }
@@ -871,10 +1042,13 @@ final class FileBrowserViewModel: ObservableObject {
             // The staged copy already occupies space, so the landing copy needs the same again.
             try SpaceCheck.require(stagedBytes, at: destDir, for: "paste these items", files: self.files)
             for item in clip.items {
-                let dest = self.files.uniqueDestination(in: destDir, preferredName: item.name)
-                try self.files.copyItem(
-                    at: staging.appendingPathComponent(item.name).path,
-                    to: dest
+                try self.files.land(
+                    source: staging.appendingPathComponent(item.name).path,
+                    sourceIsDirectory: item.isDirectory,
+                    named: item.name,
+                    into: destDir,
+                    policy: policy,
+                    move: false
                 )
             }
         }
@@ -887,19 +1061,25 @@ final class FileBrowserViewModel: ObservableObject {
         }
     }
 
-    private func transferSameContainer(_ clip: FileClipboard.Payload, destDir: String) throws {
+    private func transferSameContainer(
+        _ clip: FileClipboard.Payload,
+        destDir: String,
+        policy: ImportNamePolicy
+    ) throws {
         let destNorm = (destDir as NSString).standardizingPath
         for item in clip.items {
             let parent = ((item.path as NSString).deletingLastPathComponent as NSString).standardizingPath
             if clip.mode == .cut && parent == destNorm {
                 continue
             }
-            let dest = files.uniqueDestination(in: destDir, preferredName: item.name)
-            if clip.mode == .cut {
-                try files.moveItem(at: item.path, to: dest)
-            } else {
-                try files.copyItem(at: item.path, to: dest)
-            }
+            try files.land(
+                source: item.path,
+                sourceIsDirectory: item.isDirectory,
+                named: item.name,
+                into: destDir,
+                policy: policy,
+                move: clip.mode == .cut
+            )
         }
     }
 

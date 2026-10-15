@@ -16,7 +16,9 @@ trap 'rm -rf "$OUT"' EXIT
 SOURCES=("$ROOT"/Tests/HostTests/*.swift "$ROOT/EscapeOS/Engine/FileKind.swift" "$ROOT/EscapeOS/Engine/FileService.swift"
          "$ROOT/EscapeOS/Engine/DeleteConfirmation.swift"
          "$ROOT/EscapeOS/Engine/SpaceCheck.swift"
-         "$ROOT/EscapeOS/Engine/PasteConflicts.swift")
+         "$ROOT/EscapeOS/Engine/PasteConflicts.swift"
+         "$ROOT/EscapeOS/Engine/ContainerSearch.swift"
+         "$ROOT/EscapeOS/Engine/FavoritesStore.swift")
 SOURCES+=("$@")
 "$SW/swiftc" -O -o "$OUT/host-tests" "${SOURCES[@]}" 2>&1 | grep -v "protected function" || true
 [ -x "$OUT/host-tests" ] || { echo "COMPILE FAILED"; exit 1; }

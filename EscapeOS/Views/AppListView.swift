@@ -96,6 +96,9 @@ struct AppListView: View {
         let visible = filteredApps
         ScrollViewReader { proxy in
             List {
+                if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    FavoritesSection(viewModel: viewModel)
+                }
                 if visible.isEmpty {
                     Text(emptyListMessage)
                         .foregroundColor(.secondary)

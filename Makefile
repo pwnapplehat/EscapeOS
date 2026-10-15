@@ -23,6 +23,8 @@ EscapeOS_FILES = \
 	EscapeOS/Views/LimitsDisclaimer.swift \
 	EscapeOS/Views/ReclaimAppView.swift \
 	EscapeOS/Views/ReclaimTabView.swift \
+	EscapeOS/Views/AppSearchView.swift \
+	EscapeOS/Views/FavoritesView.swift \
 	EscapeOS/Engine/ZipReader.swift \
 	EscapeOS/Engine/BackupPaths.swift \
 	EscapeOS/Engine/RestoreService.swift \
@@ -41,6 +43,8 @@ EscapeOS_FILES = \
 	EscapeOS/Engine/ArchiveExtractor.swift \
 	EscapeOS/Engine/ReclaimService.swift \
 	EscapeOS/Engine/zip_crypto.c \
+	EscapeOS/Engine/ContainerSearch.swift \
+	EscapeOS/Engine/FavoritesStore.swift \
 	EscapeOS/Engine/bad_query.c \
 	EscapeOS/Tunnel/TunnelContext.m \
 	EscapeOS/Tunnel/applist.m \
