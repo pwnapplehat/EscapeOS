@@ -51,6 +51,10 @@ func runDeleteConfirmationTests() {
     T.check(mixed.message.contains("everything inside"), "mixed message warns about folder contents")
     T.check(!mixed.offersDontAskAgain, "a mixed selection never offers don't-ask-again")
 
+    let empty = DeleteConfirmation.prompt(for: [])
+    T.equal(empty.title, "Delete?", "an emptied selection gets a neutral title, not 'Delete 0 items?'")
+    T.check(empty.message.isEmpty && !empty.offersDontAskAgain, "and says nothing else")
+
     let exactlyFour = DeleteConfirmation.prompt(for: (1...4).map { item("g\($0)") })
     T.check(!exactlyFour.message.contains("more"), "four names are all listed with no 'more'")
 }

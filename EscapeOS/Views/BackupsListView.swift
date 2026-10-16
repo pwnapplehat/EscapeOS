@@ -81,6 +81,9 @@ struct BackupsListView: View {
         .alert(item: $vm.alertError) { error in
             Alert(title: Text("Could Not Start Restore"), message: Text(error.message), dismissButton: .default(Text("OK")))
         }
+        .alert(item: $vm.deleteError) { error in
+            Alert(title: Text("Could Not Delete Backup"), message: Text(error.message), dismissButton: .default(Text("OK")))
+        }
         .alert(backupDeleteTitle, isPresented: Binding(
             get: { !pendingBackupDelete.isEmpty },
             set: { if !$0 { pendingBackupDelete = [] } }
@@ -363,6 +366,7 @@ final class BackupsListViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var activeRestore: RestoreSession?
     @Published var alertError: IdentifiedAlert?
+    @Published var deleteError: IdentifiedAlert?
 
     private let catalog = BackupCatalog()
     private let restoreService = RestoreService()
@@ -403,11 +407,23 @@ final class BackupsListViewModel: ObservableObject {
     }
 
     func delete(records targets: [BackupRecord]) {
-        let ids = Set(targets.map(\.id))
+        var removed = Set<String>()
+        var failed: [String] = []
         for record in targets {
-            try? catalog.delete(record: record)
+            do {
+                try catalog.delete(record: record)
+                removed.insert(record.id)
+            } catch {
+                failed.append("“\(record.displayTitle)”")
+            }
         }
-        records.removeAll { ids.contains($0.id) }
+        // Only rows whose archive is really gone leave the list.
+        records.removeAll { removed.contains($0.id) }
+        if !failed.isEmpty {
+            deleteError = IdentifiedAlert(
+                message: "Could not delete the backup of \(failed.joined(separator: ", ")). It is still on this device. Try again, or remove it in Files, On My iPhone, EscapeOS, Backups."
+            )
+        }
     }
 }
 

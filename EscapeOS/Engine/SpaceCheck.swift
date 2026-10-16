@@ -7,9 +7,15 @@ import Foundation
 /// duplicate, import and backup, so the answer can be given immediately and silently when
 /// there is room.
 enum SpaceCheck {
-    /// Kept free on top of the operation's own size: temp files, zip directories, and the room iOS
-    /// itself needs to keep working.
-    static let reserveBytes: Int64 = 32 * 1024 * 1024
+    /// Working room kept free on top of an operation's own size (temp files, zip directories, and
+    /// the room iOS itself needs to keep working): at most this much, and at least `minReserveBytes`.
+    static let maxReserveBytes: Int64 = 32 * 1024 * 1024
+    static let minReserveBytes: Int64 = 1024 * 1024
+
+    /// A quarter of the job, within those limits, so a 1 KB copy is not refused for lack of 32 MB.
+    static func reserve(for needed: Int64) -> Int64 {
+        min(maxReserveBytes, max(minReserveBytes, needed / 4))
+    }
 
     enum Verdict: Equatable {
         case enough
@@ -21,7 +27,7 @@ enum SpaceCheck {
     static func verdict(needed: Int64, available: Int64?) -> Verdict {
         guard needed > 0 else { return .enough }
         guard let available else { return .unknown }
-        let (required, overflow) = needed.addingReportingOverflow(reserveBytes)
+        let (required, overflow) = needed.addingReportingOverflow(reserve(for: needed))
         if !overflow && available >= required { return .enough }
         return .notEnough(needed: needed, available: available)
     }
@@ -66,8 +72,10 @@ extension FileService {
     }
 
     /// Total bytes of regular files under `path`, or of the file itself. Symlinks count as the
-    /// link, never their target, and are not followed.
-    func treeBytes(at path: String) -> Int64 {
+    /// link, never their target, and are not followed. Stops after `maxNodes` entries, so on a
+    /// huge tree the result is a lower bound: fine for refusing work that cannot fit, never for
+    /// promising that it will.
+    func treeBytes(at path: String, maxNodes: Int = Int.max) -> Int64 {
         let fm = FileManager.default
         guard let rootType = (try? fm.attributesOfItem(atPath: path))?[.type] as? FileAttributeType else { return 0 }
         if rootType != FileAttributeType.typeDirectory {
@@ -75,7 +83,10 @@ extension FileService {
         }
         guard let walker = fm.enumerator(atPath: path) else { return 0 }
         var total: Int64 = 0
+        var nodes = 0
         while let relative = walker.nextObject() as? String {
+            nodes += 1
+            if nodes > maxNodes { break }
             let full = (path as NSString).appendingPathComponent(relative)
             guard let attrs = try? fm.attributesOfItem(atPath: full) else { continue }
             if (attrs[.type] as? FileAttributeType) == FileAttributeType.typeRegular {

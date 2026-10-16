@@ -81,11 +81,12 @@ final class BackupService {
             try escape.withHandle(for: app.containerPath) { _ in
                 // Sizes are cheap to read and the archive can be as large as the data it holds,
                 // so check before writing anything. The walk refuses more than maxTotalBytes
-                // anyway, so that is the most this can need.
+                // anyway, so that is the most this can need. The walk is bounded, so a container with
+                // a huge cache cannot stall the start; a partial total can only refuse, never allow.
                 var needed: Int64 = 0
                 for root in Self.backupRoots {
                     let rootPath = (app.containerPath as NSString).appendingPathComponent(root)
-                    if files.isDirectory(at: rootPath) { needed += files.treeBytes(at: rootPath) }
+                    if files.isDirectory(at: rootPath) { needed += files.treeBytes(at: rootPath, maxNodes: 100_000) }
                 }
                 needed = min(needed, maxTotalBytes)
                 if case .notEnough(let need, let available) = SpaceCheck.verdict(

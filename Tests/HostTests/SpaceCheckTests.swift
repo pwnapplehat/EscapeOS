@@ -3,7 +3,18 @@ import Foundation
 func runSpaceCheckTests() {
     T.section("SpaceCheck")
     let mb: Int64 = 1024 * 1024
-    let reserve = SpaceCheck.reserveBytes
+    let reserve = SpaceCheck.reserve(for: 100 * mb)
+
+    // the reserve scales with the job, within limits
+    T.equal(SpaceCheck.reserve(for: 1_000), SpaceCheck.minReserveBytes, "a tiny job keeps the minimum reserve")
+    T.equal(SpaceCheck.reserve(for: 100 * mb), 25 * mb, "a mid-size job reserves a quarter of itself")
+    T.equal(SpaceCheck.reserve(for: 10_000 * mb), SpaceCheck.maxReserveBytes, "a huge job is capped at the maximum")
+    T.equal(SpaceCheck.verdict(needed: 1_000, available: 20 * mb), .enough, "a 1 KB job fits with 20 MB free")
+    T.equal(
+        SpaceCheck.verdict(needed: 1_000, available: 500_000),
+        .notEnough(needed: 1_000, available: 500_000),
+        "but not when less than the minimum reserve is free"
+    )
 
     // verdict
     T.equal(SpaceCheck.verdict(needed: 0, available: 0), .enough, "nothing needed is always fine, even on a full disk")
@@ -48,6 +59,8 @@ func runSpaceCheckTests() {
     T.equal(files.treeBytes(at: root.appendingPathComponent("a").path), 6000, "a subfolder sums its own files")
     T.equal(files.treeBytes(at: root.appendingPathComponent("top.bin").path), 1000, "a single file is its own size")
     T.equal(files.treeBytes(at: root.appendingPathComponent("missing").path), 0, "a missing path is zero")
+    T.check(files.treeBytes(at: root.path, maxNodes: 2) < 7000, "a node limit stops the walk early (a lower bound)")
+    T.equal(files.treeBytes(at: root.path, maxNodes: 1_000), 7000, "a generous limit gives the full size")
 
     let listed = (try? files.list(directory: root.path)) ?? []
     let folder = listed.first { $0.name == "a" }

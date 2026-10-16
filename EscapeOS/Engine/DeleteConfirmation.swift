@@ -36,6 +36,11 @@ enum DeleteConfirmation {
     }
 
     static func prompt(for items: [FileItem]) -> DeletePrompt {
+        // The alert re-reads this while it is dismissing, after the selection has been cleared;
+        // a neutral prompt keeps it from flashing "Delete 0 items?".
+        if items.isEmpty {
+            return DeletePrompt(title: "Delete?", message: "", offersDontAskAgain: false)
+        }
         let folders = items.filter(\.isDirectory)
         let others = items.count - folders.count
         let filesOnly = folders.isEmpty

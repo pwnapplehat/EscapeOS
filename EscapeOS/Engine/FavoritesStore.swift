@@ -12,7 +12,9 @@ struct Favorite: Codable, Hashable, Identifiable {
     let isDirectory: Bool
     let addedAt: Date
 
-    var id: String { FavoritesStore.key(bundleIdentifier: bundleIdentifier, path: path) }
+    var id: String {
+        FavoritesStore.key(bundleIdentifier: bundleIdentifier, containerPath: containerPath, path: path)
+    }
 }
 
 /// Saved favorites. Kept in UserDefaults as one small JSON value; there is nothing to sync
@@ -29,10 +31,18 @@ struct FavoritesStore {
         self.defaults = defaults
     }
 
-    /// Identity of a favorite. Built from path components so `/var/x` and `/private/var/x`, or a
-    /// stray trailing slash, are the same favorite and cannot be added twice.
-    static func key(bundleIdentifier: String, path: String) -> String {
-        bundleIdentifier + "|" + PathContainment.components(of: path).joined(separator: "/")
+    /// Identity of a favorite: the app plus where the item sits *inside its container*.
+    ///
+    /// Built from path components, so `/var/x` and `/private/var/x`, or a stray trailing slash,
+    /// are one favorite. Taken relative to the container so it survives a reinstall: the app's
+    /// container folder changes then, but the same file is still the same favorite. A path that is
+    /// not inside the given container is keyed by its full path.
+    static func key(bundleIdentifier: String, containerPath: String, path: String) -> String {
+        let container = PathContainment.components(of: containerPath)
+        let parts = PathContainment.components(of: path)
+        let inside = !container.isEmpty && parts.count >= container.count && Array(parts.prefix(container.count)) == container
+        let relative = inside ? Array(parts.dropFirst(container.count)) : parts
+        return bundleIdentifier + "|" + (inside ? "~/" : "/") + relative.joined(separator: "/")
     }
 
     /// Newest first: what was saved last is usually what is wanted next.
@@ -42,8 +52,8 @@ struct FavoritesStore {
         return decoded.sorted { $0.addedAt > $1.addedAt }
     }
 
-    func contains(bundleIdentifier: String, path: String) -> Bool {
-        let key = Self.key(bundleIdentifier: bundleIdentifier, path: path)
+    func contains(bundleIdentifier: String, containerPath: String, path: String) -> Bool {
+        let key = Self.key(bundleIdentifier: bundleIdentifier, containerPath: containerPath, path: path)
         return all().contains { $0.id == key }
     }
 
@@ -57,16 +67,16 @@ struct FavoritesStore {
         return true
     }
 
-    func remove(bundleIdentifier: String, path: String) {
-        let key = Self.key(bundleIdentifier: bundleIdentifier, path: path)
+    func remove(bundleIdentifier: String, containerPath: String, path: String) {
+        let key = Self.key(bundleIdentifier: bundleIdentifier, containerPath: containerPath, path: path)
         save(all().filter { $0.id != key })
     }
 
     /// Returns true when the item is a favorite afterwards.
     @discardableResult
     func toggle(_ favorite: Favorite) -> Bool {
-        if contains(bundleIdentifier: favorite.bundleIdentifier, path: favorite.path) {
-            remove(bundleIdentifier: favorite.bundleIdentifier, path: favorite.path)
+        if contains(bundleIdentifier: favorite.bundleIdentifier, containerPath: favorite.containerPath, path: favorite.path) {
+            remove(bundleIdentifier: favorite.bundleIdentifier, containerPath: favorite.containerPath, path: favorite.path)
             return false
         }
         add(favorite)

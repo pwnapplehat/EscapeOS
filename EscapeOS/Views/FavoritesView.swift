@@ -13,7 +13,7 @@ final class FavoritesModel: ObservableObject {
     }
 
     func isFavorite(app: InstalledApp, path: String) -> Bool {
-        store.contains(bundleIdentifier: app.bundleIdentifier, path: path)
+        store.contains(bundleIdentifier: app.bundleIdentifier, containerPath: app.containerPath, path: path)
     }
 
     /// Returns true when the item is a favorite afterwards.
@@ -34,7 +34,11 @@ final class FavoritesModel: ObservableObject {
     }
 
     func remove(_ favorite: Favorite) {
-        store.remove(bundleIdentifier: favorite.bundleIdentifier, path: favorite.path)
+        store.remove(
+            bundleIdentifier: favorite.bundleIdentifier,
+            containerPath: favorite.containerPath,
+            path: favorite.path
+        )
         items = store.all()
     }
 }

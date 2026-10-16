@@ -21,13 +21,19 @@ struct PastePlan: Equatable {
 }
 
 enum PasteConflictPlanner {
+    /// True when `itemPath` already lives directly in `destDir`. Compared by path components, the
+    /// same way the Import guard is, so `/var` and `/private/var` spellings agree.
+    static func isInSameFolder(_ itemPath: String, as destDir: String) -> Bool {
+        PathContainment.components(of: (itemPath as NSString).deletingLastPathComponent)
+            == PathContainment.components(of: destDir)
+    }
+
     /// - Parameter moving: a cut-and-paste. Moving an item into the folder it is already in does
     ///   nothing, so it is not a conflict.
     static func plan(items: [FileItem], into destDir: String, moving: Bool, files: FileService) -> PastePlan {
         var plan = PastePlan()
-        let destParts = PathContainment.components(of: destDir)
         for item in items {
-            let sameFolder = PathContainment.components(of: (item.path as NSString).deletingLastPathComponent) == destParts
+            let sameFolder = isInSameFolder(item.path, as: destDir)
             if moving && sameFolder { continue }
             let preferred = files.preferredDestination(in: destDir, preferredName: item.name)
             let name = (preferred as NSString).lastPathComponent
@@ -101,7 +107,8 @@ extension FileService {
         named name: String,
         into destDir: String,
         policy: ImportNamePolicy,
-        move: Bool
+        move: Bool,
+        swap: (String, String) -> Int32 = { rename($0, $1) }
     ) throws -> String? {
         if policy == .cancel { return nil }
 
@@ -124,17 +131,29 @@ extension FileService {
         }
 
         let staged = (destDir as NSString).appendingPathComponent(".escapeos-replace-\(UUID().uuidString)")
-        if move { try moveItem(at: source, to: staged) } else { try copyItem(at: source, to: staged) }
-        if rename(staged, destination) != 0 {
+        do {
+            if move { try moveItem(at: source, to: staged) } else { try copyItem(at: source, to: staged) }
+        } catch {
+            // A copy can stop part-way (out of space). Never leave a hidden half-file in the folder.
+            restoreAfterFailedStage(staged: staged, source: source)
+            throw error
+        }
+        if swap(staged, destination) != 0 {
             let reason = String(cString: strerror(errno))
-            // Put things back the way they were: drop the staged copy, or return a moved original.
-            if move {
-                try? moveItem(at: staged, to: source)
-            } else {
-                try? deleteItem(at: staged)
-            }
+            restoreAfterFailedStage(staged: staged, source: source)
             throw FileServiceError.operationFailed("Could not replace “\((destination as NSString).lastPathComponent)”: \(reason)")
         }
         return destination
+    }
+
+    /// Undo a Replace that could not finish: drop a leftover staged copy, or, if the original was
+    /// moved into staging, put it back where it came from.
+    private func restoreAfterFailedStage(staged: String, source: String) {
+        guard existingKind(at: staged) != .none else { return }
+        if existingKind(at: source) == .none {
+            try? moveItem(at: staged, to: source)
+        } else {
+            try? deleteItem(at: staged)
+        }
     }
 }

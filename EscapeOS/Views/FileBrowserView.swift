@@ -25,6 +25,7 @@ struct FileBrowserView: View {
     @State private var showPasteCollision = false
     @State private var showAppSearch = false
     @State private var jumpFolder: String?
+    @State private var pendingSearchHit: SearchHit?
     @ObservedObject private var favorites = FavoritesModel.shared
 
     init(app: InstalledApp) {
@@ -310,9 +311,16 @@ struct FileBrowserView: View {
         .sheet(item: $propertiesItem) { item in
             FilePropertiesView(app: app, item: item)
         }
-        .sheet(isPresented: $showAppSearch) {
-            AppSearchView(app: app) { hit in
+        .sheet(isPresented: $showAppSearch, onDismiss: {
+            // Navigate only once the sheet has finished leaving; pushing while it is still on screen
+            // can be ignored.
+            if let hit = pendingSearchHit {
+                pendingSearchHit = nil
                 openSearchHit(hit)
+            }
+        }) {
+            AppSearchView(app: app) { hit in
+                pendingSearchHit = hit
             }
         }
         .fileImporter(
@@ -1066,11 +1074,13 @@ final class FileBrowserViewModel: ObservableObject {
         destDir: String,
         policy: ImportNamePolicy
     ) throws {
-        let destNorm = (destDir as NSString).standardizingPath
         for item in clip.items {
-            let parent = ((item.path as NSString).deletingLastPathComponent as NSString).standardizingPath
-            if clip.mode == .cut && parent == destNorm {
-                continue
+            if clip.mode == .cut {
+                // Moving into the folder it is already in does nothing. An item that is gone from
+                // its old place was moved by an earlier, interrupted paste: skip it so pasting
+                // again carries on with the rest instead of failing on the first one.
+                if PasteConflictPlanner.isInSameFolder(item.path, as: destDir) { continue }
+                if files.existingKind(at: item.path) == .none { continue }
             }
             try files.land(
                 source: item.path,
@@ -1448,17 +1458,22 @@ final class FileBrowserViewModel: ObservableObject {
         return item.name
     }
 
-    /// Stage a share file in EscapeOS Documents under the original name (no `shared_` prefix).
+    /// Stage a share file under its original name, in a folder of its own inside the temporary
+    /// directory. It used to be written straight into EscapeOS's Documents, replacing whatever had
+    /// that name, so sharing a file called `Backups` or `pairingFile.plist` deleted EscapeOS's own
+    /// backups or pairing file. Folders from earlier shares are swept first.
     private static func shareStagingURL(named name: String) throws -> URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory
+        for leftover in (try? fm.contentsOfDirectory(atPath: root.path)) ?? [] where leftover.hasPrefix("escapeos-share-") {
+            try? fm.removeItem(at: root.appendingPathComponent(leftover))
+        }
+        let folder = root.appendingPathComponent("escapeos-share-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
         let safe = name
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: ":", with: "-")
-        let dest = docs.appendingPathComponent(safe)
-        if FileManager.default.fileExists(atPath: dest.path) {
-            try FileManager.default.removeItem(at: dest)
-        }
-        return dest
+        return folder.appendingPathComponent(safe)
     }
 
     private func mutate(_ body: @escaping () throws -> Void) {
