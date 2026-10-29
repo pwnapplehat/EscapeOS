@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.2.0] - 2026-10-29
+
+Builds the six requests left open after 0.1.8 (https://github.com/pwnapplehat/EscapeOS/issues/7, #8, #9, #10, #11 and #12).
+
+**Status.** The logic behind every new feature has automated tests (1,056 checks on a computer), and each was also broken on purpose to confirm the tests notice. The screens that use that logic **have not been run on an iPhone yet**: they build, but nobody has tapped through them. See `docs/device-checklist-0.2.0.md` for what to check on a device. This release is marked a pre-release until that has been done.
+
+### Added
+
+- **Share several items at once** (#12). Select several files and folders, then More, Share / Save to Files. They go to one share sheet, each under its own name; a folder is zipped. Names that would clash (including `Report.pdf` and `report.pdf`, which the iPhone treats as the same name) are numbered, and the staged copies are removed if anything fails.
+- **Drag and drop from the Files app** (#10). Drop files or folders onto the folder you are in, or onto a folder in the list. Folders come across whole. A name that already exists asks Replace / Keep Both / Cancel exactly as Paste does, and there is the usual free-space check. Dropped items are copied into a private staging folder the moment they arrive and moved into place afterwards.
+- **Progress, speed and time left, and a queue** (#11). Copy, move, compress, extract, share, delete, import, backup and restore no longer put up a spinner that blocks the screen. A bar above the tab bar shows the running job with a percentage, speed and time left wherever those can be known (a total that is only discovered along the way shows what it can), a Cancel button, and how many are waiting. Several heavy tasks started together run one after another instead of at the same time. Quick tasks (rename, new folder) are queued behind them so they cannot run in the middle of a heavy one, but only appear on screen if they turn out slow.
+- **Trash with restore** (#9). Deleting moves items to a Trash inside EscapeOS (Settings, Trash; also Files, On My iPhone, EscapeOS, Trash) instead of removing them. It shows what is in it and how big it is, restores an item to where it was (in the app's current data, even after a reinstall) without ever replacing anything (a taken name comes back as `name 2`), saves a copy through the share sheet, and empties with one tap. **Settings, Move deleted items to the Trash** turns it off, which restores the old permanent delete. If EscapeOS is closed while an item is being moved in, the next launch settles it without deleting anything that might be the only copy.
+- **Back up and restore selected files** (#7). Back Up Selection (selection bar, More) and Back Up (long-press) save only what you choose, as a backup marked Partial in the Backups list. **Choose What to Restore** opens any backup as a tree of folders with checkboxes (a folder is ticked when everything in it is), and restores only the ticked files. A folder that no longer exists in the app is recreated. The whole backup is still verified against its checksums; only the chosen files are written, and each is checked against its own hash. Older backups open and restore as before.
+- **SQLite viewer and editor** (#8). Files ending `.db`, `.sqlite`, `.sqlite3`, `.db3` or `.sqlitedb` open as a database: tables and views with row counts, rows a page at a time, edit a value, add or delete a row. It always works on a private copy, including the write-ahead log, so rows an app has written but not yet merged are there. **Saving** first refuses if the app changed the database after you opened it (saving would overwrite its changes), keeps the original in the Trash, writes the edited database next to the original and swaps it in with one atomic rename, and removes the old log files (replaying them into the new database would corrupt it). Views, virtual tables and search-index tables are read-only, and so is a table with no way to name a row. Unsaved edits are kept if you leave the screen. Share a Copy saves the edited database as one file without touching the app.
+
+### Changed
+
+- **Compress, Share Zip and backups no longer read each file into memory whole.** Zip files are written by streaming, so a large file no longer risks the app being closed by iOS for using too much memory. Zip entries now store their names as UTF-8, so accented names are not garbled by other tools. Links inside a folder are skipped by Compress and Share Zip: following one could loop back up the tree.
+- **Copying and moving between folders and apps keeps the "do not back up" mark** that iOS puts on cache files (it is an extended attribute), as the previous method did, and reports progress and can be cancelled. A cancelled or failed copy removes what it had written.
+- **The delete confirmation says what will happen.** With the Trash on it says the items move to the Trash and can be restored; with it off it still says they are deleted permanently.
+- **A job that fails after you have left the screen it started from** now leaves a notice above the tab bar (with the reason, until dismissed) instead of failing silently.
+- **Import from Files** still cannot take a folder, and now says to drag the folder onto a folder in EscapeOS instead.
+
+### Fixed
+
+- Writing a zip to a full disk could crash the app (the older file API raises an exception Swift cannot catch). It now fails with an error.
+
+### Not in this release
+
+Opening a database over 4 GB, editing the schema (creating or dropping tables), and editing BLOB values in the SQLite editor.
+
 ## [0.1.8] - 2026-10-15
 
 Release after 0.1.6. 0.1.7 was never published; its two fixes are included here, together with features built from the requests in https://github.com/pwnapplehat/EscapeOS/issues/3 and https://github.com/pwnapplehat/EscapeOS/issues/4.

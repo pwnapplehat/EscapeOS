@@ -213,6 +213,60 @@ func runSQLiteDatabaseTests() {
         T.check((try? db.update(table: t, key: .primaryKey([.text("a")]), column: "v", to: .text("2"))) != nil, "a text key finds its row")
     }
 
+    // a row whose key is NULL is still found again: `=` never matches NULL, `IS` does
+    do {
+        let s = Scratch("sql-realnullkey")
+        let db = makeDatabase(s.path("a.db"), [
+            // every name SQLite would use for the row id is taken, so the primary key is the only handle
+            "CREATE TABLE t (rowid TEXT, oid TEXT, _rowid_ TEXT, k TEXT PRIMARY KEY, v TEXT)",
+            "INSERT INTO t (k, v) VALUES (NULL, 'x')",
+            "INSERT INTO t (k, v) VALUES ('a', 'y')",
+        ])!
+        guard let t = table(db, "t") else { T.check(false, "set-up"); return }
+        T.equal(t.keyKind, .primaryKey, "set-up: keyed by the primary key")
+        let rows = (try? db.rows(in: t, offset: 0, limit: 10)) ?? []
+        let nullRow = rows.first { $0.key == .primaryKey([.null]) }
+        T.check(nullRow != nil, "the row with a NULL key reads back with that key")
+        T.check((try? db.update(table: t, key: .primaryKey([.null]), column: "v", to: .text("changed"))) != nil, "a NULL key finds its row")
+        let after = (try? db.rows(in: t, offset: 0, limit: 10)) ?? []
+        T.equal(after.first { $0.key == .primaryKey([.null]) }?.cells.last?.value, .text("changed"), "and the change landed on that row")
+        T.equal(after.first { $0.key == .primaryKey([.text("a")]) }?.cells.last?.value, .text("y"), "while the other row is untouched")
+    }
+
+    // generated columns are shown in their place and never written
+    do {
+        let s = Scratch("sql-generated")
+        let db = makeDatabase(s.path("a.db"), [
+            "CREATE TABLE g (id INTEGER PRIMARY KEY, a INTEGER, b INTEGER GENERATED ALWAYS AS (a * 2) VIRTUAL, c TEXT)",
+            "INSERT INTO g (id, a, c) VALUES (1, 5, 'see')",
+        ])!
+        guard let g = table(db, "g") else { T.check(false, "set-up"); return }
+        T.equal(g.columns.map(\.name), ["id", "a", "b", "c"], "the generated column is listed")
+        T.equal(g.columns.map(\.isGenerated), [false, false, true, false], "and marked")
+        let rows = (try? db.rows(in: g, offset: 0, limit: 10)) ?? []
+        T.equal(rows.first?.cells.map(\.value) ?? [], [.integer(1), .integer(5), .integer(10), .text("see")], "its value sits in its own place, so no cell is shifted onto the wrong name")
+        func failure(_ body: () throws -> Void) -> SQLiteError? {
+            do { try body(); return nil } catch let e as SQLiteError { return e } catch { return nil }
+        }
+        T.check((failure { try db.update(table: g, key: .rowID(1), column: "b", to: .integer(3)) }?.errorDescription ?? "").contains("worked out by SQLite"), "it cannot be updated")
+        T.check((failure { try db.insert(table: g, values: ["a": .integer(1), "b": .integer(2)]) }?.errorDescription ?? "").contains("worked out by SQLite"), "or given a value on insert")
+        T.check((try? db.update(table: g, key: .rowID(1), column: "c", to: .text("ok"))) != nil, "the ordinary columns still edit")
+    }
+
+    // one view that SQLite cannot read does not stop the rest of the file opening
+    do {
+        let s = Scratch("sql-badview")
+        let db = makeDatabase(s.path("a.db"), [
+            "CREATE TABLE good (id INTEGER PRIMARY KEY, v TEXT)",
+            "CREATE VIEW broken AS SELECT no_such_function(v) AS x FROM good",
+        ])!
+        let all = try? db.tables()
+        T.check(all != nil, "the schema still loads")
+        T.check(all?.contains { $0.name == "good" && $0.isEditable } ?? false, "the ordinary table is there and editable")
+        let broken = all?.first { $0.name == "broken" }
+        T.check(broken != nil && broken?.isEditable == false && broken?.readOnlyReason != nil, "the unreadable view is listed, read-only, with a reason")
+    }
+
     // names that need quoting, and values that look like SQL
     do {
         let s = Scratch("sql-quote")

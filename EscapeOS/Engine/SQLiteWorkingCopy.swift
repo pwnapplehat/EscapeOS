@@ -63,6 +63,9 @@ final class SQLiteWorkingCopy {
     private let folder: URL
     private let files: FileService
     private let renamer: (String, String) -> Bool
+    /// Runs after the edited copy is written next to the original and before the final check; a
+    /// seam for tests to play the app writing to the original at that moment.
+    var beforeSwap: () -> Void = {}
     private var opened: [String: FileSignature] = [:]
     /// SQLite counts changes per connection, and a connection is reopened after a save attempt, so
     /// edits made before the reopen are carried here rather than lost from the count.
@@ -256,6 +259,15 @@ final class SQLiteWorkingCopy {
             try? files.deleteItem(at: temporary)
             reopen(saved: false)
             throw WorkingCopyError.saveFailed(error.localizedDescription)
+        }
+
+        // The copy can take a while for a large database. If the app wrote to the original in the
+        // meantime, saving now would overwrite its changes: look once more just before touching it.
+        beforeSwap()
+        if hasOriginalChanged() {
+            try? files.deleteItem(at: temporary)
+            reopen(saved: false)
+            throw WorkingCopyError.originalChanged
         }
 
         // 4. Set the original's log files aside, so they can be put back if the swap fails.

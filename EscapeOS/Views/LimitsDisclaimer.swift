@@ -9,6 +9,8 @@ EscapeOS lists installed apps through LocalDevVPN and a pairing file (iOS 18 and
 
 You can browse, preview, edit, back up, restore, and reclaim cache/tmp space in those containers. Reclaim never deletes Documents, Preferences, Application Support, Keychain, App Groups, or system folders. Reset App Data on an app’s detail screen does empty Documents, Library, and tmp.
 
+Deleted items go to a Trash inside EscapeOS so they can be restored; turn that off in Settings. The SQLite editor works on a copy and keeps the original in the Trash before it saves over it.
+
 Close the target app before restoring, reclaiming, or editing live databases. A restore overwrites files in that container.
 """
 }

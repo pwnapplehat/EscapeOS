@@ -20,6 +20,12 @@ On-device file browser and App Store app-data backup/restore for sideloaded iOS,
 - Asks before it deletes: files and folders confirm (a file can opt out with Don’t Ask Again, which Settings can turn back on), as does deleting a backup. Pasting a name that already exists asks Replace, Keep Both, or Cancel. Compress, Share Zip, Duplicate, Paste, Import and Backup check free space first and stop with a clear message instead of failing late.
 - **Reclaim** ranks apps by cache/tmp size and can empty Safe buckets (`tmp`, `Library/Caches`, logs, splash snapshots). Session buckets (cookies, WebKit) are opt-in per app. Documents, Preferences, and Application Support are never reclaimed.
 - **Reset App Data** on an app’s detail screen empties that app’s Documents, Library, and tmp. It does not touch Keychain or App Groups.
+- **Share several items at once.** Select items, then More → Share / Save to Files: one share sheet, each item under its own name, folders as zips.
+- **Drag and drop** files or folders from the Files app onto a folder here. A name that already exists asks Replace, Keep Both, or Cancel.
+- **Progress and a queue.** Long operations show a percentage, speed, and time left where those can be known, can be cancelled, and run one after another instead of together.
+- **Trash.** Deleting moves items to a Trash (Settings → Trash, or Files → On My iPhone → EscapeOS → Trash) with its size shown. Restore puts an item back where it was without overwriting anything. Turn it off in Settings.
+- **Selective backup and restore.** Back up chosen files and folders (a Partial backup), and restore only the files you tick from any backup.
+- **SQLite viewer and editor.** `.db`, `.sqlite`, and `.sqlite3` files open as tables. Edits are made on a copy; saving checks the app has not changed the database, keeps the original in the Trash, and swaps the file in atomically.
 
 ## What it does not do
 
@@ -43,6 +49,8 @@ The IPA will install on iOS 18.0 or later (`MinimumOSVersion` 18.0). **Opening a
 | iOS 27.0 beta 5 and later | **Unsupported** (outside bad_query). | — | — |
 
 iOS 15, 16, and 17 cannot install this IPA.
+
+**0.2.0 status.** The logic behind the new features (share several, drop, queue, Trash, selective backup and restore, SQLite editor) has automated tests, but the screens that use it have not yet been run on a device. Until they have, the table above describes 0.1.8's verified behaviour only. `docs/device-checklist-0.2.0.md` lists what to check.
 
 ## Requirements
 

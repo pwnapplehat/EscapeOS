@@ -162,6 +162,12 @@ func runImportStagingTests() {
         let none = (try? ImportStaging.land(cancelled, into: s.path("dest"), policy: .cancel, files: files)) ?? ["?"]
         T.check(none.isEmpty, "Cancel lands nothing")
         T.check(cancelled.allSatisfy { FileManager.default.fileExists(atPath: $0.path) }, "and the staged copies stay until discarded")
+        // Cancel is checked against an empty folder too: nothing clashes there, so only the policy stops the landing
+        s.mkdir("fresh")
+        let freshCancel = stageAll()
+        let freshNone = (try? ImportStaging.land(freshCancel, into: s.path("fresh"), policy: .cancel, files: files)) ?? ["?"]
+        T.check(freshNone.isEmpty, "Cancel lands nothing even when no name clashes")
+        T.check(((try? FileManager.default.contentsOfDirectory(atPath: s.path("fresh"))) ?? ["?"]).isEmpty, "and the destination stays empty")
         ImportStaging.discard(folder)
         T.check(!s.exists("staging"), "discarding removes the staging folder")
     }

@@ -152,6 +152,13 @@ final class BackupService {
                             "None of the chosen files or folders could be found in the app's data any more."
                         )
                     }
+                    // An empty folder, or files that could not be read, would make a backup with
+                    // nothing in it that no restore accepts: better to say so now.
+                    if manifest.isEmpty {
+                        throw BackupError.containerInaccessible(
+                            "The chosen items contain no files that could be read, so there is nothing to back up."
+                        )
+                    }
                 } else {
                     var foundRoot = false
                     for root in Self.backupRoots {

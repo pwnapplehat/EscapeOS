@@ -196,9 +196,9 @@ struct FileBrowserView: View {
         .sheet(item: $vm.sharePayload) { payload in
             ActivityShareView(urls: payload.urls)
         }
-        .sheet(isPresented: $showTrash) {
+        .sheet(isPresented: $showTrash, onDismiss: { vm.open(vm.currentPath) }) {
             NavigationView {
-                TrashView(apps: [app])
+                TrashView(apps: [app], appsAreComplete: false)
             }
         }
         .alert(item: $vm.exportError) { err in

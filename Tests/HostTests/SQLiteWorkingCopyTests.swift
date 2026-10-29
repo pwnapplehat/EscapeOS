@@ -155,6 +155,33 @@ func runSQLiteWorkingCopyTests() {
         copy.discard()
     }
 
+    // the app writes to the original while the save is under way: caught just before the swap
+    do {
+        let s = Scratch("wc-changed-late")
+        guard let original = makeLeftoverWALDatabase(s) else { T.check(false, "set-up"); return }
+        s.mkdir("tmp")
+        guard let copy = try? SQLiteWorkingCopy.open(original: original, files: files, temporaryDirectory: URL(fileURLWithPath: s.path("tmp")), retryDelay: 0),
+              let items = table(copy.database, "items") else { T.check(false, "set-up: open"); return }
+        try? copy.database.update(table: items, key: .rowID(1), column: "name", to: .text("EDITED"))
+        copy.beforeSwap = {
+            if let handle = FileHandle(forWritingAtPath: original + "-wal") {
+                handle.seekToEndOfFile()
+                handle.write(Data(repeating: 0, count: 64))
+                try? handle.close()
+            }
+        }
+        let mainBefore = bytes(original), walBefore = bytes(original + "-wal")
+        var error: WorkingCopyError?
+        do { try copy.saveToOriginal { _ in } } catch let e as WorkingCopyError { error = e } catch {}
+        T.equal(error, .originalChanged, "a change made after the first check still stops the save")
+        T.equal(bytes(original), mainBefore, "the original database is untouched")
+        T.check(bytes(original + "-wal") != nil && (bytes(original + "-wal")?.count ?? 0) >= (walBefore?.count ?? 0), "and its log is still beside it")
+        let leftovers = names(in: (original as NSString).deletingLastPathComponent).filter { $0.hasPrefix(".escapeos-") }
+        T.equal(leftovers, [], "no temporary file is left next to it")
+        T.check(copy.hasUnsavedChanges, "the edits are still there")
+        copy.discard()
+    }
+
     // the app changed the database after it was opened: refuse, change nothing
     do {
         let s = Scratch("wc-changed")

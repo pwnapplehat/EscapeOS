@@ -27,6 +27,19 @@ final class OperationCenter: ObservableObject {
     /// What the bar shows: queued and running jobs, oldest first.
     @Published private(set) var jobs: [JobInfo] = []
 
+    /// The last job that failed, kept on screen until dismissed or the next job starts. Each screen
+    /// shows its own alert for a job it started, but the user may have left that screen by now, and
+    /// a failure nobody sees is worse than one seen twice.
+    @Published private(set) var lastFailure: FailureNotice?
+
+    struct FailureNotice: Identifiable, Equatable {
+        let id = UUID()
+        let title: String
+        let message: String
+    }
+
+    func dismissFailure() { lastFailure = nil }
+
     private lazy var queue = JobQueue(completionQueue: .main, onChange: { [weak self] in
         DispatchQueue.main.async { self?.refresh() }
     })
@@ -45,12 +58,14 @@ final class OperationCenter: ObservableObject {
         work: @escaping (JobContext) throws -> String?,
         finish: @escaping (OperationResult) -> Void = { _ in }
     ) -> UUID {
-        queue.submit(title: title, kind: kind, scope: scope, work: work, completion: { outcome in
+        lastFailure = nil
+        return queue.submit(title: title, kind: kind, scope: scope, work: work, completion: { [weak self] outcome in
             switch outcome {
             case .succeeded(let message):
                 if let message { CopyFeedback.shared.show(message) }
                 finish(.done(message: message))
             case .failed(let error):
+                self?.lastFailure = FailureNotice(title: title, message: error.localizedDescription)
                 finish(.failed(error))
             case .cancelled:
                 finish(.cancelled)
@@ -100,6 +115,54 @@ struct OperationsBar: View {
     @State private var showQueue = false
 
     var body: some View {
+        // The sheet hangs off the Group, not the bar: when the last job ends the bar goes away, and
+        // a sheet attached to it would be torn down with `showQueue` still true, to pop up again
+        // with the next job.
+        Group {
+            bar
+            if center.jobs.isEmpty, let failure = center.lastFailure {
+                failureNotice(failure)
+            }
+        }
+            .sheet(isPresented: $showQueue) {
+                OperationsListView(center: center)
+            }
+            .onChange(of: center.jobs.isEmpty) { empty in
+                if empty { showQueue = false }
+            }
+    }
+
+    private func failureNotice(_ failure: OperationCenter.FailureNotice) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("“\(failure.title)” did not finish")
+                    .font(.subheadline.weight(.semibold))
+                Text(failure.message)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(4)
+            }
+            Spacer(minLength: 8)
+            Button {
+                center.dismissFailure()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3)
+                    .foregroundColor(.secondary)
+            }
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: Color.black.opacity(0.18), radius: 8, y: 2)
+        .padding(.horizontal, 12)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var bar: some View {
         if let current = center.runningJob ?? center.waitingJobs.first {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
@@ -150,9 +213,6 @@ struct OperationsBar: View {
             .shadow(color: Color.black.opacity(0.18), radius: 8, y: 2)
             .padding(.horizontal, 12)
             .accessibilityElement(children: .contain)
-            .sheet(isPresented: $showQueue) {
-                OperationsListView(center: center)
-            }
         }
     }
 }

@@ -92,6 +92,8 @@ struct SQLiteColumn: Equatable {
     /// 1-based position within the primary key, or 0 when it is not part of it.
     let primaryKeyPosition: Int
     let defaultValue: String?
+    /// Worked out by SQLite from other columns: shown, never written.
+    var isGenerated = false
 
     var isPrimaryKey: Bool { primaryKeyPosition > 0 }
 }
@@ -212,9 +214,21 @@ final class SQLiteDatabase {
             guard case .text(let name) = row[0], case .text(let type) = row[1] else { continue }
             var sql: String?
             if case .text(let text) = row[2] { sql = text }
-            let columns = try self.columns(of: name)
             let isVirtual = virtualNames.contains(name)
             let kind: SQLiteTable.Kind = type == "view" ? .view : (isVirtual ? .virtual : .table)
+            let columns: [SQLiteColumn]
+            do {
+                columns = try self.columns(of: name)
+            } catch {
+                // A view or virtual table that needs something this SQLite lacks (a custom
+                // tokenizer, a function the app registers) must not make the whole file unopenable.
+                result.append(SQLiteTable(
+                    name: name, kind: kind, columns: [], keyKind: .none,
+                    readOnlyReason: "SQLite here cannot read this \(kind == .view ? "view" : "table"): \(error.localizedDescription)",
+                    sql: sql
+                ))
+                continue
+            }
 
             var keyKind = SQLiteTable.KeyKind.none
             var reason: String?
@@ -239,9 +253,13 @@ final class SQLiteDatabase {
     }
 
     func columns(of table: String) throws -> [SQLiteColumn] {
-        let info = try query("PRAGMA table_info(\(Self.quote(table)))")
+        // table_xinfo, not table_info: generated columns are in SELECT * but left out of table_info,
+        // which would shift every cell against its column name. Hidden columns of a virtual table
+        // (hidden = 1) are not in SELECT *, so they are left out here.
+        let info = try query("PRAGMA table_xinfo(\(Self.quote(table)))")
         return info.compactMap { row in
-            guard row.count >= 6, case .text(let name) = row[1] else { return nil }
+            guard row.count >= 7, case .text(let name) = row[1] else { return nil }
+            if case .integer(let hidden) = row[6], hidden == 1 { return nil }
             var declared = ""
             if case .text(let type) = row[2] { declared = type }
             var notNull = false
@@ -250,7 +268,9 @@ final class SQLiteDatabase {
             if case .text(let text) = row[4] { fallback = text }
             var position = 0
             if case .integer(let pk) = row[5] { position = Int(pk) }
-            return SQLiteColumn(name: name, declaredType: declared, isNotNull: notNull, primaryKeyPosition: position, defaultValue: fallback)
+            var generated = false
+            if case .integer(let hidden) = row[6], hidden >= 2 { generated = true }
+            return SQLiteColumn(name: name, declaredType: declared, isNotNull: notNull, primaryKeyPosition: position, defaultValue: fallback, isGenerated: generated)
         }
     }
 
@@ -349,8 +369,11 @@ final class SQLiteDatabase {
 
     func update(table: SQLiteTable, key: SQLiteRowKey, column: String, to value: SQLiteValue) throws {
         try requireEditable(table)
-        guard table.columns.contains(where: { $0.name == column }) else {
+        guard let target = table.columns.first(where: { $0.name == column }) else {
             throw SQLiteError.invalidValue("There is no column “\(column)”.")
+        }
+        guard !target.isGenerated else {
+            throw SQLiteError.invalidValue("“\(column)” is worked out by SQLite from other columns, so it cannot be changed.")
         }
         let (condition, bindings) = try whereClause(for: table, key: key)
         let statement = try prepare("UPDATE \(Self.quote(table.name)) SET \(Self.quote(column)) = ? WHERE \(condition)")
@@ -362,8 +385,13 @@ final class SQLiteDatabase {
 
     func insert(table: SQLiteTable, values: [String: SQLiteValue]) throws {
         try requireEditable(table)
-        for name in values.keys where !table.columns.contains(where: { $0.name == name }) {
-            throw SQLiteError.invalidValue("There is no column “\(name)”.")
+        for name in values.keys {
+            guard let target = table.columns.first(where: { $0.name == name }) else {
+                throw SQLiteError.invalidValue("There is no column “\(name)”.")
+            }
+            guard !target.isGenerated else {
+                throw SQLiteError.invalidValue("“\(name)” is worked out by SQLite from other columns, so it cannot be given a value.")
+            }
         }
         let ordered = table.columns.map(\.name).filter { values[$0] != nil }
         let sql: String

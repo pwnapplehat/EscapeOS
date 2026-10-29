@@ -330,6 +330,47 @@ func runFileTransferTests() {
         T.check(!s.exists("dst"), "the copy was taken back out")
     }
 
+    // a removal that gets part of the way leaves the copy as the only complete one: it is kept
+    do {
+        let s = Scratch("move-partial-removal")
+        s.write("src/a.txt", text: "a")
+        s.write("src/b.txt", text: "b")
+        var message = ""
+        do {
+            _ = try files.moveTree(
+                from: s.path("src"),
+                to: s.path("dst"),
+                rename: { _, _ in false },
+                removeSource: { path in
+                    try FileManager.default.removeItem(atPath: (path as NSString).appendingPathComponent("a.txt"))
+                    throw FileServiceError.operationFailed("disk error")
+                }
+            )
+        } catch { message = error.localizedDescription }
+        T.check(s.exists("dst/a.txt") && s.exists("dst/b.txt"), "the complete copy is kept when the original is half removed")
+        T.equal(s.read("dst/a.txt"), Data("a".utf8), "with its content")
+        T.check(message.contains("The complete copy is at"), "and the error says where it is")
+        T.check(!message.contains("nothing was moved"), "and does not claim nothing was moved")
+    }
+
+    // a removal that fails before removing anything still takes the copy back out
+    do {
+        let s = Scratch("move-removal-fails-at-once")
+        s.write("src/a.txt", text: "a")
+        var message = ""
+        do {
+            _ = try files.moveTree(
+                from: s.path("src"),
+                to: s.path("dst"),
+                rename: { _, _ in false },
+                removeSource: { _ in throw FileServiceError.operationFailed("locked") }
+            )
+        } catch { message = error.localizedDescription }
+        T.check(s.exists("src/a.txt"), "the original is whole")
+        T.check(!s.exists("dst"), "so there is no second copy")
+        T.check(message.contains("nothing was moved"), "and the error says nothing was moved")
+    }
+
     // refusing to overwrite, and a missing source
     do {
         let s = Scratch("move-guards")

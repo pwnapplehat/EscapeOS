@@ -15,8 +15,6 @@ final class TrashViewModel: ObservableObject {
     func reload() {
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
-            // Settle anything an interrupted move left half-done before showing the list.
-            self.store.recoverInterrupted()
             let found = self.store.records()
             let total = found.reduce(Int64(0)) { $0 + $1.bytes }
             DispatchQueue.main.async {
@@ -96,7 +94,6 @@ final class TrashViewModel: ObservableObject {
         )
         let box = Box<[URL]>()
         operations.submit("Preparing “\(record.name)”", kind: .heavy, scope: nil, work: { context in
-            ShareStaging.sweepLeftovers()
             context.meter.setTotals(bytes: record.bytes)
             box.value = try ShareStaging.stage(
                 entries: ShareStaging.plan(items: [item]),
@@ -120,6 +117,8 @@ final class TrashViewModel: ObservableObject {
 struct TrashView: View {
     /// The apps installed on this device, to find where each item belongs.
     let apps: [InstalledApp]
+    /// False when `apps` is only the app being browsed: other apps' items are then restored from Settings, not from here.
+    var appsAreComplete = true
 
     @StateObject private var vm = TrashViewModel()
     @State private var confirmEmpty = false
@@ -135,7 +134,7 @@ struct TrashView: View {
             } else {
                 Section(header: Text(summary)) {
                     ForEach(vm.records) { record in
-                        TrashRow(record: record, restorable: canRestore(record))
+                        TrashRow(record: record, restorable: canRestore(record), appsAreComplete: appsAreComplete)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
                                     pendingDelete = record
@@ -220,6 +219,7 @@ struct TrashView: View {
 private struct TrashRow: View {
     let record: TrashRecord
     let restorable: Bool
+    let appsAreComplete: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -245,7 +245,7 @@ private struct TrashRow: View {
                         .foregroundColor(.orange)
                 }
                 if !restorable {
-                    Label("\(record.appName) is not installed", systemImage: "app.badge.checkmark")
+                    Label(appsAreComplete ? "\(record.appName) is not installed" : "Restore this from Settings, Trash", systemImage: "app.badge.checkmark")
                         .font(.caption)
                         .foregroundColor(.orange)
                 }

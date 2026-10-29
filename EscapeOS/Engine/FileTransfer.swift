@@ -72,16 +72,21 @@ extension FileService {
 
     /// Move to a path that does not exist yet. Renames when it can (instant, no extra space);
     /// otherwise copies and then deletes the original, and only after the copy is complete. If the
-    /// original cannot be deleted the copy is removed again, so a failed move never leaves two.
+    /// original cannot be deleted at all the copy is removed again, so a failed move never leaves
+    /// two. If deleting it got part of the way, the original is no longer whole, so the copy is the
+    /// only complete one and is kept: both exist, and the error says so.
     ///
-    /// - Parameter rename: the rename attempt; replaceable so the fallback can be tested.
+    /// - Parameters:
+    ///   - rename: the rename attempt; replaceable so the fallback can be tested.
+    ///   - removeSource: removes the original after the copy; replaceable so a half-done removal can be tested.
     @discardableResult
     func moveTree(
         from source: String,
         to destination: String,
         observer: TransferObserver = .none,
         chunkSize: Int = FileService.transferChunkBytes,
-        rename attempt: (String, String) -> Bool = { rename($0, $1) == 0 }
+        rename attempt: (String, String) -> Bool = { rename($0, $1) == 0 },
+        removeSource: ((String) throws -> Void)? = nil
     ) throws -> Int64 {
         if existingKind(at: destination) != .none || isSymlink(at: destination) {
             throw FileServiceError.operationFailed("“\((destination as NSString).lastPathComponent)” already exists.")
@@ -93,15 +98,32 @@ extension FileService {
         if attempt(source, destination) { return 0 }
 
         let copied = try copyTree(from: source, to: destination, observer: observer, chunkSize: chunkSize)
+        let nodesBefore = nodeCount(at: source)
         do {
-            try deleteItem(at: source)
+            if let removeSource { try removeSource(source) } else { try deleteItem(at: source) }
         } catch {
+            let name = (source as NSString).lastPathComponent
+            if nodeCount(at: source) < nodesBefore {
+                throw FileServiceError.operationFailed(
+                    "Could not finish removing the original “\(name)”: part of it is already gone. The complete copy is at “\(destination)”; nothing was lost. \(error.localizedDescription)"
+                )
+            }
             try? deleteItem(at: destination)
             throw FileServiceError.operationFailed(
-                "Could not remove the original “\((source as NSString).lastPathComponent)”, so nothing was moved. \(error.localizedDescription)"
+                "Could not remove the original “\(name)”, so nothing was moved. \(error.localizedDescription)"
             )
         }
         return copied
+    }
+
+    /// How many things are at `path`, itself included. A link counts as one and is not followed.
+    private func nodeCount(at path: String) -> Int {
+        guard existingKind(at: path) != .none || isSymlink(at: path) else { return 0 }
+        var count = 1
+        if let walker = FileManager.default.enumerator(atPath: path) {
+            while walker.nextObject() != nil { count += 1 }
+        }
+        return count
     }
 
     /// True for a symlink, including one whose target is gone.

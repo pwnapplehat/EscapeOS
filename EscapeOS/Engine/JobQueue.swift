@@ -179,10 +179,10 @@ final class JobQueue {
 
     /// Queued and running jobs, oldest first.
     func snapshot() -> [JobInfo] {
+        // Read under the lock: the worker changes a record's state while it runs.
         lock.lock()
-        let current = records
-        lock.unlock()
-        return current.map { record in
+        defer { lock.unlock() }
+        return records.map { record in
             JobInfo(
                 id: record.id,
                 title: record.title,

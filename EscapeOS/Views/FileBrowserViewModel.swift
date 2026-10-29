@@ -808,7 +808,6 @@ final class FileBrowserViewModel: ObservableObject {
         let title = items.count == 1 ? "Preparing “\(items[0].name)”" : "Preparing \(items.count) items"
         operations.submit(title, kind: .heavy, scope: app.containerPath, work: { context in
             try self.escape.withHandle(for: self.app.containerPath) { _ in
-                ShareStaging.sweepLeftovers()
                 let bytes = self.files.totalBytes(of: items)
                 try SpaceCheck.require(
                     bytes,

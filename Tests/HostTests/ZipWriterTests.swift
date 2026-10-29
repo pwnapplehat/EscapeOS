@@ -180,6 +180,30 @@ func runZipWriterTests() {
         T.check(true, "abandoning twice is harmless")
     }
 
+    // links inside a folder are left out: one can point back up the tree, and following it would never end
+    do {
+        let s = Scratch("zip-links")
+        s.write("pack/real.txt", text: "real")
+        s.write("pack/sub/inner.txt", text: "inner")
+        try? FileManager.default.createSymbolicLink(atPath: s.path("pack/up"), withDestinationPath: s.path("pack"))
+        try? FileManager.default.createSymbolicLink(atPath: s.path("pack/alias.txt"), withDestinationPath: s.path("pack/real.txt"))
+        try? FileManager.default.createSymbolicLink(atPath: s.path("pack/dangling"), withDestinationPath: "nowhere")
+        let zipPath = s.path("links.zip")
+        let writer = ZipWriter()
+        var ok = true
+        do {
+            try writer.begin(at: URL(fileURLWithPath: zipPath))
+            try writer.addItems([testItem(s, "pack", files: files)], files: files, skipPath: zipPath)
+            try writer.finish()
+        } catch { ok = false; writer.abandon() }
+        T.check(ok, "a folder holding links is zipped without looping or failing")
+        let names = Set((FileManager.default.contents(atPath: zipPath).flatMap(MiniZip.init)?.entries.map(\.name)) ?? [])
+        T.check(names.contains("pack/real.txt") && names.contains("pack/sub/inner.txt"), "the real files are in it")
+        T.check(!names.contains { $0.hasPrefix("pack/up") }, "the link back up the tree is not followed")
+        T.check(!names.contains("pack/alias.txt"), "a link to a file is not stored as a copy of it")
+        T.check(!names.contains("pack/dangling"), "and a dangling link is left out")
+    }
+
     // the archive being written is never packed into itself
     do {
         let s = Scratch("zip-self")

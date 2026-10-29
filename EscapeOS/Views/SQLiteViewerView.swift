@@ -20,6 +20,8 @@ final class SQLiteViewerModel: ObservableObject {
     @Published var rowCounts: [String: Int] = [:]
     @Published var hasUnsavedChanges = false
     @Published var isSaving = false
+    /// The screen was closed while a save was running; the save's end finishes the closing.
+    private var closeRequested = false
     /// SQLite's report when its quick check finds something wrong, else nil.
     @Published var healthWarning: String?
     @Published var error: IdentifiedError?
@@ -216,6 +218,11 @@ final class SQLiteViewerModel: ObservableObject {
                 DispatchQueue.main.async {
                     self.hasUnsavedChanges = dirty
                     if !dirty { Self.sessions[self.sessionKey] = nil }
+                    // The screen was closed while this was saving: finish what close() could not.
+                    if self.closeRequested {
+                        self.closeRequested = false
+                        if dirty { Self.sessions[self.sessionKey] = self } else { self.discard() }
+                    }
                 }
             }
         })
@@ -228,7 +235,6 @@ final class SQLiteViewerModel: ObservableObject {
         let box = Box<[URL]>()
         operations.submit("Preparing “\(name)”", kind: .heavy, scope: nil, work: { context in
             try self.dbQueue.sync {
-                ShareStaging.sweepLeftovers()
                 let path = try copy.shareablePath()
                 let shareItem = FileItem(
                     name: name, path: path, kind: .regular,
@@ -258,7 +264,10 @@ final class SQLiteViewerModel: ObservableObject {
     /// Close the copy. If there are unsaved edits the session is kept, so opening the file again
     /// resumes them; `discardEdits` throws them away.
     func close() {
-        guard !isSaving else { return }
+        guard !isSaving else {
+            closeRequested = true
+            return
+        }
         if hasUnsavedChanges {
             Self.sessions[sessionKey] = self
             return
@@ -267,15 +276,17 @@ final class SQLiteViewerModel: ObservableObject {
     }
 
     func discardEdits() {
+        guard !isSaving else { return }
         Self.sessions[sessionKey] = nil
         discard()
     }
 
     private func discard() {
         cancelOpening()
-        dbQueue.sync {
-            copy?.discard()
-            copy = nil
+        // Off the main thread: the queue may be busy with a long read.
+        dbQueue.async {
+            self.copy?.discard()
+            self.copy = nil
         }
     }
 }
@@ -335,9 +346,10 @@ struct SQLiteViewerView: View {
                     model.discardEdits()
                     dismiss()
                 }
+                .disabled(model.isSaving)
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Keep Editing Later leaves your changes here, and opening the file again picks them up. Nothing reaches the app until you Save.")
+                Text("Keep Editing Later leaves your changes here until EscapeOS is closed, and opening the file again picks them up. Nothing reaches the app until you Save.")
             }
             .alert(item: $model.error) { failure in
                 Alert(title: Text("Database"), message: Text(failure.message), dismissButton: .default(Text("OK")))
@@ -453,7 +465,7 @@ struct SQLiteTableView: View {
     @State private var page = 0
     @State private var isLoading = true
     @State private var message: String?
-    @State private var editing: SQLiteRow?
+    @State private var editing: RowSelection?
     @State private var adding = false
     @State private var pendingDelete: SQLiteRow?
 
@@ -478,7 +490,7 @@ struct SQLiteTableView: View {
                 }
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                     Button {
-                        editing = row
+                        editing = RowSelection(row: row)
                     } label: {
                         RowSummary(table: table, row: row)
                     }
@@ -526,10 +538,7 @@ struct SQLiteTableView: View {
             }
         }
         .onAppear { load() }
-        .sheet(item: Binding(
-            get: { editing.map { RowSelection(row: $0) } },
-            set: { if $0 == nil { editing = nil } }
-        )) { selection in
+        .sheet(item: $editing) { selection in
             SQLiteRowEditor(model: model, table: table, row: selection.row) { reload() }
         }
         .sheet(isPresented: $adding) {
@@ -680,7 +689,7 @@ struct SQLiteRowEditor: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .disabled(!table.isEditable || row.key == nil || isBlob(cell))
+                        .disabled(!table.isEditable || row.key == nil || isBlob(cell) || column.isGenerated)
                     }
                 }
             }
@@ -823,7 +832,7 @@ struct SQLiteNewRowView: View {
         NavigationView {
             Form {
                 Section(footer: Text("Leave a column empty to use its default (or NULL). Text is stored as typed; whole numbers and decimals are stored as numbers.")) {
-                    ForEach(table.columns, id: \.name) { column in
+                    ForEach(table.columns.filter { !$0.isGenerated }, id: \.name) { column in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(column.name + (column.declaredType.isEmpty ? "" : " · \(column.declaredType)"))
                                 .font(.caption)
@@ -859,7 +868,7 @@ struct SQLiteNewRowView: View {
 
     private func add() {
         var values: [String: SQLiteValue] = [:]
-        for column in table.columns {
+        for column in table.columns where !column.isGenerated {
             let raw = texts[column.name] ?? ""
             if raw.isEmpty { continue }
             values[column.name] = Self.guess(raw, declaredType: column.declaredType)

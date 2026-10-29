@@ -44,6 +44,17 @@ func runProgressMeterTests() {
         T.check(zero.snapshot().fraction == nil, "a zero total gives no fraction rather than dividing by it")
     }
 
+    // when every byte is done there is nothing left to estimate, finished or not
+    do {
+        let clock = FakeClock()
+        let meter = ProgressMeter(clock: { clock.now })
+        meter.setTotals(bytes: 100 * mb)
+        for _ in 0..<4 { clock.tick(1); meter.add(bytes: 25 * mb) }
+        let s = meter.snapshot()
+        T.equal(s.bytesDone, 100 * mb, "all the bytes are done")
+        T.check(s.secondsRemaining == nil, "no time left is claimed once the bytes are all done")
+    }
+
     // fraction falls back to items, and bytes win when both are known
     do {
         let clock = FakeClock()
