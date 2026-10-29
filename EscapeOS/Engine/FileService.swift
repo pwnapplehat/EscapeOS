@@ -360,7 +360,7 @@ final class FileService {
 
     // MARK: - Helpers
 
-    private func mapError(_ error: Error, path: String) -> FileServiceError {
+    func mapError(_ error: Error, path: String) -> FileServiceError {
         let ns = error as NSError
         if ns.domain == NSCocoaErrorDomain {
             switch ns.code {

@@ -140,7 +140,7 @@ final class ZipReader {
     }
 
     /// Unpack every entry under `destDir`. Rejects `..` paths.
-    func extract(into destDir: String, files: FileService, password: String? = nil) throws {
+    func extract(into destDir: String, files: FileService, password: String? = nil, observer: TransferObserver = .none) throws {
         if needsPassword, password == nil || password?.isEmpty == true {
             throw ZipReaderError.passwordRequired
         }
@@ -148,7 +148,9 @@ final class ZipReader {
         try files.createDirectory(at: root)
         var fileCount = 0
         var byteCount: Int64 = 0
+        observer.total(entries.values.reduce(Int64(0)) { $0 + Int64($1.uncompressedSize) })
         for name in entryNames() {
+            try observer.checkCancelled()
             if name.isEmpty { continue }
             let resolved = try ArchiveEntryPath.resolve(name, under: destDir)
             if resolved.isDirectory {
@@ -164,7 +166,9 @@ final class ZipReader {
             if byteCount > 2_000_000_000 {
                 throw FileServiceError.operationFailed("Extracted data would be larger than 2 GB.")
             }
+            observer.detail((resolved.path as NSString).lastPathComponent)
             try files.writeFile(data: payload, to: resolved.path)
+            observer.bytes(Int64(payload.count))
         }
     }
 

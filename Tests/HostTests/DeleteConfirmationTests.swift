@@ -57,4 +57,42 @@ func runDeleteConfirmationTests() {
 
     let exactlyFour = DeleteConfirmation.prompt(for: (1...4).map { item("g\($0)") })
     T.check(!exactlyFour.message.contains("more"), "four names are all listed with no 'more'")
+
+    // Without the Trash the buttons say Delete, as they always did.
+    T.equal(one.confirmLabel, "Delete", "the permanent prompt's button says Delete")
+    T.equal(one.dontAskLabel, "Delete, Don’t Ask Again", "and its don't-ask button says so")
+
+    // With the Trash (issue #9) it talks about moving and restoring, never about permanent loss.
+    let trashOne = DeleteConfirmation.prompt(for: [item("notes.txt")], usesTrash: true)
+    T.equal(trashOne.title, "Move “notes.txt” to the Trash?", "a single file moves to the Trash")
+    T.equal(trashOne.confirmLabel, "Move to Trash", "the button says what it does")
+    T.equal(trashOne.dontAskLabel, "Move to Trash, Don’t Ask Again", "and so does the don't-ask button")
+    T.check(trashOne.message.contains("restore it from the Trash"), "it says it can be restored")
+    T.check(trashOne.message.contains("takes up its space"), "and that the Trash takes room")
+    T.check(!trashOne.message.contains("permanently") && !trashOne.message.contains("can't be undone"), "and does not claim the loss is permanent")
+    T.check(trashOne.offersDontAskAgain, "a single file still offers don't-ask-again")
+
+    let trashFolder = DeleteConfirmation.prompt(for: [item("Caches", folder: true)], usesTrash: true)
+    T.equal(trashFolder.title, "Move “Caches” and everything inside to the Trash?", "a folder says everything inside goes")
+    T.check(trashFolder.message.contains("all of its contents go to the Trash"), "its message says so")
+    T.check(!trashFolder.offersDontAskAgain, "a folder still never offers don't-ask-again")
+
+    let trashMany = DeleteConfirmation.prompt(for: (1...7).map { item("f\($0).bin") }, usesTrash: true)
+    T.equal(trashMany.title, "Move 7 items to the Trash?", "several items are counted")
+    T.check(trashMany.message.contains("“f1.bin”, “f2.bin”, “f3.bin”, “f4.bin” and 3 more"), "four names then the rest")
+    T.check(trashMany.message.contains("7 files"), "the files are counted")
+    T.check(trashMany.message.contains("restore them"), "the plural wording is used")
+    T.check(trashMany.message.contains("They stay on this device"), "all the way through")
+    T.check(trashMany.offersDontAskAgain, "files alone still offer don't-ask-again")
+
+    let trashMixed = DeleteConfirmation.prompt(for: [item("a.txt"), item("D", folder: true), item("b.txt")], usesTrash: true)
+    T.check(trashMixed.message.contains("2 files and 1 folder"), "a mixed selection counts both")
+    T.check(trashMixed.message.contains("Folders go with everything inside them"), "and warns about folders")
+    T.check(!trashMixed.offersDontAskAgain, "and never offers don't-ask-again")
+
+    let trashEmpty = DeleteConfirmation.prompt(for: [], usesTrash: true)
+    T.equal(trashEmpty.title, "Move to Trash?", "an emptied selection gets a neutral title")
+    T.check(trashEmpty.message.isEmpty && !trashEmpty.offersDontAskAgain, "and says nothing else")
+    T.equal(trashEmpty.confirmLabel, "Move to Trash", "with the right button")
+    T.equal(DeleteConfirmation.prompt(for: [item("a")], usesTrash: false), DeleteConfirmation.prompt(for: [item("a")]), "usesTrash defaults to the old wording")
 }

@@ -1,5 +1,8 @@
 import Foundation
 
+// Unbuffered, so a crash in a test still shows how far the run got.
+setvbuf(stdout, nil, _IONBF, 0)
+
 runPathContainmentTests()
 runDeleteConfirmationTests()
 runSpaceCheckTests()
@@ -7,4 +10,15 @@ runPasteConflictsTests()
 runPasteConflictsRobustnessTests()
 runContainerSearchTests()
 runFavoritesStoreTests()
+runProgressMeterTests()
+runJobQueueTests()
+runFileTransferTests()
+runZipWriterTests()
+runShareStagingTests()
+runTrashStoreTests()
+runBackupSelectionTests()
+runImportStagingTests()
+runSQLiteDatabaseTests()
+runSQLiteWorkingCopyTests()
+runFileKindTests()
 T.finish()

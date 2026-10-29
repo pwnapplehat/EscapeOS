@@ -25,8 +25,22 @@ EscapeOS_FILES = \
 	EscapeOS/Views/ReclaimTabView.swift \
 	EscapeOS/Views/AppSearchView.swift \
 	EscapeOS/Views/FavoritesView.swift \
+	EscapeOS/Views/FileBrowserViewModel.swift \
+	EscapeOS/Views/TrashView.swift \
+	EscapeOS/Views/SQLiteViewerView.swift \
+	EscapeOS/Views/RestorePickerView.swift \
 	EscapeOS/Engine/ZipReader.swift \
 	EscapeOS/Engine/BackupPaths.swift \
+	EscapeOS/Engine/BackupSelection.swift \
+	EscapeOS/Engine/ProgressMeter.swift \
+	EscapeOS/Engine/JobQueue.swift \
+	EscapeOS/Engine/FileTransfer.swift \
+	EscapeOS/Engine/ShareStaging.swift \
+	EscapeOS/Engine/TrashStore.swift \
+	EscapeOS/Engine/OperationCenter.swift \
+	EscapeOS/Engine/SQLiteDatabase.swift \
+	EscapeOS/Engine/SQLiteWorkingCopy.swift \
+	EscapeOS/Engine/ImportStaging.swift \
 	EscapeOS/Engine/RestoreService.swift \
 	EscapeOS/Engine/SandboxEscape.swift \
 	EscapeOS/Engine/FileKind.swift \
@@ -60,7 +74,7 @@ EscapeOS_CFLAGS = -IEscapeOS/Engine -IEscapeOS/Tunnel
 EscapeOS_OBJCFLAGS = -IEscapeOS/Engine -IEscapeOS/Tunnel -fobjc-arc
 
 # Link the Rust idevice FFI static library and its system dependencies.
-EscapeOS_LDFLAGS = -LEscapeOS/Tunnel -lidevice_ffi -lresolv -framework Security -framework Network -framework SystemConfiguration -framework QuickLook -framework PDFKit -framework AVKit -framework AVFoundation
+EscapeOS_LDFLAGS = -LEscapeOS/Tunnel -lidevice_ffi -lresolv -lsqlite3 -framework Security -framework Network -framework SystemConfiguration -framework QuickLook -framework PDFKit -framework AVKit -framework AVFoundation
 EscapeOS_CODESIGN_FLAGS = -SEscapeOS.entitlements
 
 include $(THEOS_MAKE_PATH)/application.mk

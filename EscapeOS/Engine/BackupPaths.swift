@@ -1,17 +1,5 @@
 import Foundation
 
-/// Metadata embedded in every backup archive as `backup.json`.
-struct BackupMetadata: Codable, Hashable {
-    let bundleIdentifier: String
-    let appName: String
-    let containerPath: String
-    let createdAt: String
-    let fileCount: Int
-    let totalBytes: Int64
-    let manifestSHA256: String
-    let escapeOSVersion: String
-}
-
 /// A backup archive on disk with parsed metadata.
 struct BackupRecord: Identifiable, Hashable {
     let id: String
@@ -22,9 +10,10 @@ struct BackupRecord: Identifiable, Hashable {
     let modified: Date?
 
     var displayTitle: String { metadata.appName }
-    var displaySubtitle: String {
-        "\(metadata.fileCount) files · \(Self.formatBytes(metadata.totalBytes))"
-    }
+    var displaySubtitle: String { BackupDescription.subtitle(for: metadata) }
+
+    /// For a partial backup, what it covers by name; nil for a full one.
+    var scopeSummary: String? { BackupDescription.scopeSummary(for: metadata) }
 }
 
 /// Shared paths and catalog helpers for backup archives.
@@ -121,13 +110,5 @@ final class BackupCatalog {
 
     func delete(record: BackupRecord) throws {
         try FileManager.default.removeItem(at: record.archiveURL)
-    }
-}
-
-private extension BackupRecord {
-    static func formatBytes(_ bytes: Int64) -> String {
-        let f = ByteCountFormatter()
-        f.countStyle = .file
-        return f.string(fromByteCount: bytes)
     }
 }

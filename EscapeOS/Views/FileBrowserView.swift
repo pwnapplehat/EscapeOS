@@ -23,9 +23,13 @@ struct FileBrowserView: View {
     @State private var archivePassword = ""
     @State private var showImportCollision = false
     @State private var showPasteCollision = false
+    @State private var showDropCollision = false
     @State private var showAppSearch = false
+    @State private var showTrash = false
     @State private var jumpFolder: String?
     @State private var pendingSearchHit: SearchHit?
+    /// The folder row (or `vm.currentPath` for the whole list) a drag is hovering over.
+    @State private var dropTarget: String?
     @ObservedObject private var favorites = FavoritesModel.shared
 
     init(app: InstalledApp) {
@@ -78,7 +82,7 @@ struct FileBrowserView: View {
                         } label: {
                             Image(systemName: clipboard.payload?.mode == .cut ? "scissors" : "doc.on.clipboard")
                         }
-                        .disabled(vm.isPasting)
+                        .disabled(vm.isBusy)
                         .accessibilityLabel(clipboard.pasteTitle)
                     }
                     Button("Select") { enterSelection() }
@@ -89,7 +93,7 @@ struct FileBrowserView: View {
                             } label: {
                                 Label(clipboard.pasteTitle, systemImage: "doc.on.clipboard")
                             }
-                            .disabled(vm.isPasting)
+                            .disabled(vm.isBusy)
                             Button("Clear Clipboard", role: .destructive) {
                                 clipboard.clear()
                             }
@@ -112,6 +116,11 @@ struct FileBrowserView: View {
                             Label("Import from Files", systemImage: "square.and.arrow.down")
                         }
                         .disabled(vm.isBusy || vm.pendingImport != nil)
+                        Button {
+                            showTrash = true
+                        } label: {
+                            Label("Trash", systemImage: "trash")
+                        }
                         Button {
                             showAppSearch = true
                         } label: {
@@ -185,10 +194,15 @@ struct FileBrowserView: View {
             }
         )
         .sheet(item: $vm.sharePayload) { payload in
-            ActivityShareView(url: payload.url)
+            ActivityShareView(urls: payload.urls)
+        }
+        .sheet(isPresented: $showTrash) {
+            NavigationView {
+                TrashView(apps: [app])
+            }
         }
         .alert(item: $vm.exportError) { err in
-            Alert(title: Text("Could not share file"), message: Text(err.message), dismissButton: .default(Text("OK")))
+            Alert(title: Text("Could not prepare files to share"), message: Text(err.message), dismissButton: .default(Text("OK")))
         }
         .alert(item: $vm.operationError) { err in
             Alert(title: Text("File Operation Failed"), message: Text(err.message), dismissButton: .default(Text("OK")))
@@ -248,13 +262,13 @@ struct FileBrowserView: View {
             set: { if !$0 { pendingDelete = [] } }
         )) {
             Button("Cancel", role: .cancel) { pendingDelete = [] }
-            Button("Delete", role: .destructive) {
+            Button(deletePrompt.confirmLabel, role: .destructive) {
                 vm.delete(items: pendingDelete)
                 selected.subtract(pendingDelete.map(\.path))
                 pendingDelete = []
             }
             if deletePrompt.offersDontAskAgain {
-                Button("Delete, Don’t Ask Again", role: .destructive) {
+                Button(deletePrompt.dontAskLabel, role: .destructive) {
                     confirmFileDeletes = false
                     vm.delete(items: pendingDelete)
                     selected.subtract(pendingDelete.map(\.path))
@@ -307,6 +321,28 @@ struct FileBrowserView: View {
         }
         .onChange(of: vm.pendingPaste?.id) { _ in
             showPasteCollision = vm.pendingPaste != nil
+        }
+        .alert(
+            vm.pendingDropTitle,
+            isPresented: $showDropCollision,
+            presenting: vm.pendingDrop
+        ) { choice in
+            Button("Cancel", role: .cancel) {
+                vm.cancelPendingDrop()
+            }
+            Button("Keep Both") {
+                vm.finishPendingDrop(choice, policy: .keepBoth)
+            }
+            if choice.plan.canReplace {
+                Button("Replace", role: .destructive) {
+                    vm.finishPendingDrop(choice, policy: .replace)
+                }
+            }
+        } message: { choice in
+            Text(PasteConflictPlanner.message(for: choice.plan))
+        }
+        .onChange(of: vm.pendingDrop?.id) { _ in
+            showDropCollision = vm.pendingDrop != nil
         }
         .sheet(item: $propertiesItem) { item in
             FilePropertiesView(app: app, item: item)
@@ -380,7 +416,7 @@ struct FileBrowserView: View {
     }
 
     private var deletePrompt: DeletePrompt {
-        DeleteConfirmation.prompt(for: pendingDelete)
+        DeleteConfirmation.prompt(for: pendingDelete, usesTrash: TrashPreference.isEnabled())
     }
 
     private var fileList: some View {
@@ -405,6 +441,17 @@ struct FileBrowserView: View {
                         FileRow(item: item)
                     }
                     .contentShape(Rectangle())
+                    .listRowBackground(dropTarget == item.path ? Color.accentColor.opacity(0.18) : nil)
+                    .onDrop(
+                        of: [UTType.item],
+                        isTargeted: Binding(
+                            get: { dropTarget == item.path },
+                            set: { dropTarget = $0 ? item.path : (dropTarget == item.path ? nil : dropTarget) }
+                        )
+                    ) { providers in
+                        vm.importDropped(providers, into: item.path)
+                        return true
+                    }
                     .contextMenu { itemMenu(for: item) }
                 } else if FileContentKind.classify(name: item.name, isDirectory: false) == .archive {
                     Button {
@@ -414,7 +461,6 @@ struct FileBrowserView: View {
                     }
                     .buttonStyle(.plain)
                     .contentShape(Rectangle())
-                    .disabled(vm.isZipping)
                     .contextMenu { itemMenu(for: item) }
                 } else {
                     NavigationLink(destination: FileViewerView(app: app, item: item, mode: .auto)) {
@@ -427,6 +473,23 @@ struct FileBrowserView: View {
             .onDelete(perform: deleteAtOffsets)
         }
         .environment(\.editMode, .constant(.inactive))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.accentColor, lineWidth: 3)
+                .padding(4)
+                .opacity(dropTarget == vm.currentPath ? 1 : 0)
+                .allowsHitTesting(false)
+        )
+        .onDrop(
+            of: [UTType.item],
+            isTargeted: Binding(
+                get: { dropTarget == vm.currentPath },
+                set: { dropTarget = $0 ? vm.currentPath : (dropTarget == vm.currentPath ? nil : dropTarget) }
+            )
+        ) { providers in
+            vm.importDropped(providers)
+            return true
+        }
         .refreshable {
             vm.open(vm.currentPath)
         }
@@ -463,7 +526,7 @@ struct FileBrowserView: View {
                 selectionAction("Cut", "scissors", enabled: !selectedItems.isEmpty) {
                     FileClipboard.shared.cut(selectedItems, containerPath: app.containerPath)
                 }
-                selectionAction("Paste", "doc.on.clipboard", enabled: !clipboard.isEmpty && !vm.isPasting) {
+                selectionAction("Paste", "doc.on.clipboard", enabled: !clipboard.isEmpty && !vm.isBusy) {
                     vm.paste()
                 }
                 Menu {
@@ -472,7 +535,24 @@ struct FileBrowserView: View {
                     } label: {
                         Label(selectedItems.count == 1 ? "Compress" : "Compress to Zip", systemImage: "doc.zipper")
                     }
-                    .disabled(selectedItems.isEmpty || vm.isZipping)
+                    .disabled(selectedItems.isEmpty)
+                    Button {
+                        vm.share(items: selectedItems)
+                    } label: {
+                        Label(
+                            selectedItems.count == 1 && selectedItems.first?.isDirectory == false
+                                ? "Share / Save to Files"
+                                : "Share / Save to Files (folders as zips)",
+                            systemImage: "square.and.arrow.up"
+                        )
+                    }
+                    .disabled(selectedItems.isEmpty)
+                    Button {
+                        vm.backUp(items: selectedItems)
+                    } label: {
+                        Label("Back Up Selection", systemImage: "externaldrive.badge.plus")
+                    }
+                    .disabled(selectedItems.isEmpty)
                     Button {
                         vm.duplicate(items: selectedItems)
                     } label: {
@@ -499,21 +579,6 @@ struct FileBrowserView: View {
                             propertiesItem = item
                         } label: {
                             Label("Properties", systemImage: "info.circle")
-                        }
-                        if !item.isDirectory {
-                            Button {
-                                vm.export(item: item)
-                            } label: {
-                                Label("Share / Save to Files", systemImage: "square.and.arrow.up")
-                            }
-                            .disabled(vm.isExporting || vm.isZipping)
-                        } else {
-                            Button {
-                                vm.export(item: item)
-                            } label: {
-                                Label("Share Zip", systemImage: "square.and.arrow.up")
-                            }
-                            .disabled(vm.isExporting || vm.isZipping)
                         }
                     }
                 } label: {
@@ -585,7 +650,6 @@ struct FileBrowserView: View {
                     } label: {
                         Label("Extract", systemImage: "archivebox")
                     }
-                    .disabled(vm.isZipping)
                     Button {
                         openRequest = OpenRequest(item: item, mode: .hex)
                     } label: {
@@ -596,6 +660,13 @@ struct FileBrowserView: View {
                         openRequest = OpenRequest(item: item, mode: .auto)
                     } label: {
                         Label("Open", systemImage: "eye")
+                    }
+                    if FileContentKind.opensAsDatabase(name: item.name) {
+                        Button {
+                            openRequest = OpenRequest(item: item, mode: .database)
+                        } label: {
+                            Label("Open as Database", systemImage: "cylinder.split.1x2")
+                        }
                     }
                     Button {
                         openRequest = OpenRequest(item: item, mode: .preview)
@@ -615,20 +686,23 @@ struct FileBrowserView: View {
                 }
             }
             Button {
-                vm.export(item: item)
+                vm.share(items: [item])
             } label: {
                 Label(
                     item.isDirectory ? "Share Zip" : "Share / Save to Files",
                     systemImage: "square.and.arrow.up"
                 )
             }
-            .disabled(vm.isExporting || vm.isZipping)
             Button {
                 vm.zip(items: [item])
             } label: {
                 Label("Compress", systemImage: "doc.zipper")
             }
-            .disabled(vm.isZipping)
+            Button {
+                vm.backUp(items: [item])
+            } label: {
+                Label("Back Up", systemImage: "externaldrive.badge.plus")
+            }
         }
         Group {
             Button {
@@ -688,15 +762,6 @@ struct FileBrowserView: View {
 enum CreateKind {
     case file
     case folder
-}
-
-/// A paste that is waiting for the person to choose Replace, Keep Both or Cancel.
-struct PendingPasteChoice: Identifiable {
-    let id = UUID()
-    let clip: FileClipboard.Payload
-    let destDir: String
-    let destContainer: String
-    let plan: PastePlan
 }
 
 private struct OpenRequest: Identifiable {
@@ -760,771 +825,4 @@ struct FileRow: View {
         f.timeStyle = .short
         return f
     }()
-}
-
-/// View model driving the file browser.
-final class FileBrowserViewModel: ObservableObject {
-    @Published var items: [FileItem] = []
-    @Published var currentPath: String = "/"
-    @Published var isLoading = false
-    @Published var errorMessage: String?
-    @Published var sharePayload: SharePayload?
-    @Published var isExporting = false
-    @Published var isZipping = false
-    @Published var isPasting = false
-    @Published var busyTitle = "Working…"
-    @Published var exportError: IdentifiedError?
-    @Published var operationError: IdentifiedError?
-    @Published var unzipPasswordItem: FileItem?
-    @Published var unzipPasswordMessage = "This archive is password-protected. Enter the password to extract it."
-    @Published var pendingImport: PendingImportPrompt?
-    @Published var pendingPaste: PendingPasteChoice?
-
-    var isBusy: Bool { isZipping || isExporting || isPasting }
-
-    let app: InstalledApp
-    private let escape = SandboxEscape()
-    private let files = FileService()
-
-    init(app: InstalledApp, initialPath: String? = nil) {
-        self.app = app
-        if let initialPath = initialPath {
-            self.currentPath = initialPath
-        } else {
-            self.currentPath = app.containerPath
-        }
-    }
-
-    var displayTitle: String {
-        let last = (currentPath as NSString).lastPathComponent
-        return last.isEmpty ? app.name : last
-    }
-
-    var pendingPasteTitle: String {
-        guard let choice = pendingPaste else { return "Replace existing file?" }
-        return PasteConflictPlanner.title(for: choice.plan)
-    }
-
-    var pendingImportTitle: String {
-        guard let pending = pendingImport else { return "Replace existing file?" }
-        return Self.importCollisionTitle(for: pending)
-    }
-
-    static func importCollisionTitle(for pending: PendingImportPrompt) -> String {
-        let files = pending.collidingFileNames
-        if files.count == 1 && pending.collidingFolderNames.isEmpty {
-            return "Replace “\(files[0])”?"
-        }
-        if !files.isEmpty {
-            return files.count == 1 ? "Replace existing file?" : "Replace \(files.count) files?"
-        }
-        return "Name already used"
-    }
-
-    static func importCollisionMessage(for pending: PendingImportPrompt) -> String {
-        var parts: [String] = []
-        if pending.collidingFileNames.count == 1 {
-            parts.append(
-                "A file with this name is already in this folder. Replace keeps the same location and name."
-            )
-        } else if pending.collidingFileNames.count > 1 {
-            let listed = quotedList(pending.collidingFileNames)
-            parts.append(
-                "\(listed) already exist in this folder. Replace keeps each original location and name."
-            )
-        }
-        if pending.collidingFolderNames.count == 1 {
-            parts.append(
-                "A folder named “\(pending.collidingFolderNames[0])” is already here. EscapeOS will not replace a folder with a file — Keep Both saves the import under a new name."
-            )
-        } else if pending.collidingFolderNames.count > 1 {
-            let listed = quotedList(pending.collidingFolderNames)
-            parts.append(
-                "Folders named \(listed) are already here. Those imports are saved under new names; a folder is never replaced with a file."
-            )
-        }
-        return parts.joined(separator: " ")
-    }
-
-    private static func quotedList(_ names: [String]) -> String {
-        let shown = names.prefix(4)
-        let quoted = shown.map { "“\($0)”" }.joined(separator: ", ")
-        if names.count <= 4 { return quoted }
-        return "\(quoted), and \(names.count - 4) more"
-    }
-
-    func open(_ path: String) {
-        isLoading = true
-        errorMessage = nil
-        currentPath = path
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                let listed = try self.escape.withHandle(for: self.app.containerPath) { _ in
-                    try self.files.list(directory: path)
-                }
-                DispatchQueue.main.async {
-                    self.items = listed
-                    self.isLoading = false
-                }
-            } catch let e as SandboxEscapeError {
-                DispatchQueue.main.async {
-                    self.errorMessage = e.localizedDescription
-                    self.isLoading = false
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.errorMessage = error.localizedDescription
-                    self.isLoading = false
-                }
-            }
-        }
-    }
-
-    func create(name: String, kind: CreateKind) {
-        guard let safe = FileNameRules.sanitize(name) else {
-            operationError = IdentifiedError(message: "Enter a file name without slashes.")
-            return
-        }
-        let dest = (currentPath as NSString).appendingPathComponent(safe)
-        mutate {
-            if kind == .folder {
-                try self.files.createDirectory(at: dest)
-            } else {
-                try self.files.createEmptyFile(at: dest)
-            }
-        }
-    }
-
-    func rename(item: FileItem, to newName: String) {
-        guard let safe = FileNameRules.sanitize(newName) else {
-            operationError = IdentifiedError(message: "Enter a file name without slashes.")
-            return
-        }
-        mutate {
-            try self.files.renameItem(at: item.path, to: safe)
-        }
-    }
-
-    func delete(item: FileItem) {
-        delete(items: [item])
-    }
-
-    func delete(items: [FileItem]) {
-        guard !items.isEmpty else { return }
-        mutate {
-            for item in items {
-                try self.files.deleteItem(at: item.path)
-            }
-        }
-    }
-
-    func paste() {
-        guard let clip = FileClipboard.shared.payload, !clip.items.isEmpty else { return }
-        guard !isPasting, pendingPaste == nil else { return }
-        isPasting = true
-        busyTitle = "Pasting…"
-        let destDir = currentPath
-        let destContainer = app.containerPath
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                for item in clip.items where Self.wouldNest(source: item.path, inside: destDir) {
-                    throw FileServiceError.operationFailed("Can't paste a folder into itself.")
-                }
-                // Ask before a pasted name lands on one that exists, the way Import from Files does.
-                let plan = try self.escape.withHandle(for: destContainer) { _ in
-                    PasteConflictPlanner.plan(
-                        items: clip.items,
-                        into: destDir,
-                        moving: clip.mode == .cut,
-                        files: self.files
-                    )
-                }
-                if plan.hasConflicts {
-                    DispatchQueue.main.async {
-                        self.isPasting = false
-                        self.pendingPaste = PendingPasteChoice(
-                            clip: clip,
-                            destDir: destDir,
-                            destContainer: destContainer,
-                            plan: plan
-                        )
-                    }
-                    return
-                }
-                self.runPaste(clip, into: destDir, destContainer: destContainer, policy: .keepBoth)
-            } catch {
-                DispatchQueue.main.async {
-                    self.isPasting = false
-                    self.operationError = IdentifiedError(message: error.localizedDescription)
-                }
-            }
-        }
-    }
-
-    func cancelPendingPaste() {
-        pendingPaste = nil
-    }
-
-    func finishPendingPaste(_ choice: PendingPasteChoice, policy: ImportNamePolicy) {
-        guard policy != .cancel else {
-            pendingPaste = nil
-            return
-        }
-        // Button actions can fire twice; the captured choice is still valid the second time.
-        guard !isPasting else { return }
-        pendingPaste = nil
-        isPasting = true
-        busyTitle = "Pasting…"
-        DispatchQueue.global(qos: .userInitiated).async {
-            self.runPaste(choice.clip, into: choice.destDir, destContainer: choice.destContainer, policy: policy)
-        }
-    }
-
-    /// Runs on the calling background queue; reports back on the main queue.
-    private func runPaste(
-        _ clip: FileClipboard.Payload,
-        into destDir: String,
-        destContainer: String,
-        policy: ImportNamePolicy
-    ) {
-        do {
-            try paste(clip, into: destDir, destContainer: destContainer, policy: policy)
-            DispatchQueue.main.async {
-                self.isPasting = false
-                if clip.mode == .cut {
-                    FileClipboard.shared.clear()
-                }
-                self.open(self.currentPath)
-            }
-        } catch {
-            DispatchQueue.main.async {
-                self.isPasting = false
-                self.operationError = IdentifiedError(message: error.localizedDescription)
-            }
-        }
-    }
-
-    private func paste(
-        _ clip: FileClipboard.Payload,
-        into destDir: String,
-        destContainer: String,
-        policy: ImportNamePolicy
-    ) throws {
-        for item in clip.items {
-            if Self.wouldNest(source: item.path, inside: destDir) {
-                throw FileServiceError.operationFailed("Can't paste a folder into itself.")
-            }
-        }
-        if clip.containerPath == destContainer {
-            try escape.withHandle(for: destContainer) { _ in
-                if clip.mode == .copy {
-                    try SpaceCheck.require(
-                        self.files.totalBytes(of: clip.items),
-                        at: destDir,
-                        for: "paste these items",
-                        files: self.files
-                    )
-                }
-                try self.transferSameContainer(clip, destDir: destDir, policy: policy)
-            }
-            return
-        }
-
-        let staging = FileManager.default.temporaryDirectory
-            .appendingPathComponent("escapeos-clip-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: staging) }
-
-        var stagedBytes: Int64 = 0
-        try escape.withHandle(for: clip.containerPath) { _ in
-            stagedBytes = self.files.totalBytes(of: clip.items)
-            try SpaceCheck.require(stagedBytes, at: staging.path, for: "paste these items", files: self.files)
-            for item in clip.items {
-                try self.files.copyItem(
-                    at: item.path,
-                    to: staging.appendingPathComponent(item.name).path
-                )
-            }
-        }
-        try escape.withHandle(for: destContainer) { _ in
-            // The staged copy already occupies space, so the landing copy needs the same again.
-            try SpaceCheck.require(stagedBytes, at: destDir, for: "paste these items", files: self.files)
-            for item in clip.items {
-                try self.files.land(
-                    source: staging.appendingPathComponent(item.name).path,
-                    sourceIsDirectory: item.isDirectory,
-                    named: item.name,
-                    into: destDir,
-                    policy: policy,
-                    move: false
-                )
-            }
-        }
-        if clip.mode == .cut {
-            try escape.withHandle(for: clip.containerPath) { _ in
-                for item in clip.items {
-                    try self.files.deleteItem(at: item.path)
-                }
-            }
-        }
-    }
-
-    private func transferSameContainer(
-        _ clip: FileClipboard.Payload,
-        destDir: String,
-        policy: ImportNamePolicy
-    ) throws {
-        for item in clip.items {
-            if clip.mode == .cut {
-                // Moving into the folder it is already in does nothing. An item that is gone from
-                // its old place was moved by an earlier, interrupted paste: skip it so pasting
-                // again carries on with the rest instead of failing on the first one.
-                if PasteConflictPlanner.isInSameFolder(item.path, as: destDir) { continue }
-                if files.existingKind(at: item.path) == .none { continue }
-            }
-            try files.land(
-                source: item.path,
-                sourceIsDirectory: item.isDirectory,
-                named: item.name,
-                into: destDir,
-                policy: policy,
-                move: clip.mode == .cut
-            )
-        }
-    }
-
-    private static func wouldNest(source: String, inside destDir: String) -> Bool {
-        let src = (source as NSString).standardizingPath
-        let dest = (destDir as NSString).standardizingPath
-        return dest == src || dest.hasPrefix(src + "/")
-    }
-
-    func duplicate(item: FileItem) {
-        duplicate(items: [item])
-    }
-
-    func duplicate(items: [FileItem]) {
-        guard !items.isEmpty else { return }
-        mutate {
-            if let first = items.first {
-                try SpaceCheck.require(
-                    self.files.totalBytes(of: items),
-                    at: (first.path as NSString).deletingLastPathComponent,
-                    for: "duplicate these items",
-                    files: self.files
-                )
-            }
-            for item in items {
-                let parent = (item.path as NSString).deletingLastPathComponent
-                let ns = item.name as NSString
-                let ext = ns.pathExtension
-                let base = ns.deletingPathExtension
-                let preferred = ext.isEmpty ? "\(item.name) copy" : "\(base) copy.\(ext)"
-                let dest = self.files.uniqueDestination(in: parent, preferredName: preferred)
-                try self.files.copyItem(at: item.path, to: dest)
-            }
-        }
-    }
-
-    func importFiles(from urls: [URL]) {
-        guard !urls.isEmpty else { return }
-        guard !isBusy, pendingImport == nil else { return }
-        isZipping = true
-        busyTitle = urls.count == 1 ? "Importing…" : "Importing \(urls.count) items…"
-        let destDir = currentPath
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                let payloads = try Self.readImportPayloads(from: urls)
-                let outcome: PendingImportPrompt? = try self.escape.withHandle(for: self.app.containerPath) { _ in
-                    try Self.assertPath(destDir, under: self.app.containerPath)
-                    let plan = Self.collisionPlan(for: payloads, in: destDir, files: self.files)
-                    if plan.collidingFileNames.isEmpty && plan.collidingFolderNames.isEmpty {
-                        try self.writeImportPayloads(payloads, into: destDir, policy: .keepBoth)
-                        return nil
-                    }
-                    return PendingImportPrompt(
-                        destDir: destDir,
-                        payloads: payloads,
-                        collidingFileNames: plan.collidingFileNames,
-                        collidingFolderNames: plan.collidingFolderNames
-                    )
-                }
-                DispatchQueue.main.async {
-                    self.isZipping = false
-                    if let outcome = outcome {
-                        self.pendingImport = outcome
-                    } else {
-                        self.open(self.currentPath)
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.isZipping = false
-                    self.operationError = IdentifiedError(message: error.localizedDescription)
-                }
-            }
-        }
-    }
-
-    func cancelPendingImport() {
-        pendingImport = nil
-    }
-
-    func finishPendingImport(_ pending: PendingImportPrompt, policy: ImportNamePolicy) {
-        guard policy != .cancel else {
-            pendingImport = nil
-            return
-        }
-        // Button actions can fire twice; the captured prompt is still valid the second time.
-        guard !isBusy else { return }
-        pendingImport = nil
-        isZipping = true
-        busyTitle = pending.payloads.count == 1 ? "Importing…" : "Importing \(pending.payloads.count) items…"
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                try self.escape.withHandle(for: self.app.containerPath) { _ in
-                    try Self.assertPath(pending.destDir, under: self.app.containerPath)
-                    try self.writeImportPayloads(
-                        pending.payloads,
-                        into: pending.destDir,
-                        policy: policy
-                    )
-                }
-                DispatchQueue.main.async {
-                    self.isZipping = false
-                    self.open(self.currentPath)
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.isZipping = false
-                    self.operationError = IdentifiedError(message: error.localizedDescription)
-                }
-            }
-        }
-    }
-
-    private static func readImportPayloads(from urls: [URL]) throws -> [ImportPayload] {
-        var payloads: [ImportPayload] = []
-        for url in urls {
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-            let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-            if isDirectory {
-                throw FileServiceError.operationFailed(
-                    "“\(url.lastPathComponent)” is a folder. Import from Files picks files, not folders."
-                )
-            }
-            let data = try Data(contentsOf: url)
-            payloads.append(ImportPayload(name: url.lastPathComponent, data: data))
-        }
-        return payloads
-    }
-
-    private static func assertPath(_ path: String, under root: String) throws {
-        guard PathContainment.isInside(path, root: root) else {
-            throw FileServiceError.operationFailed("That folder is outside this app's data.")
-        }
-    }
-
-    private static func collisionPlan(
-        for payloads: [ImportPayload],
-        in destDir: String,
-        files: FileService
-    ) -> (collidingFileNames: [String], collidingFolderNames: [String]) {
-        var filesSeen = Set<String>()
-        var foldersSeen = Set<String>()
-        var collidingFiles: [String] = []
-        var collidingFolders: [String] = []
-        for payload in payloads {
-            let dest = files.preferredDestination(in: destDir, preferredName: payload.name)
-            let name = (dest as NSString).lastPathComponent
-            switch files.existingKind(at: dest) {
-            case .none:
-                continue
-            case .file:
-                if filesSeen.insert(name).inserted {
-                    collidingFiles.append(name)
-                }
-            case .directory:
-                if foldersSeen.insert(name).inserted {
-                    collidingFolders.append(name)
-                }
-            }
-        }
-        return (collidingFiles, collidingFolders)
-    }
-
-    private func writeImportPayloads(
-        _ payloads: [ImportPayload],
-        into destDir: String,
-        policy: ImportNamePolicy
-    ) throws {
-        try SpaceCheck.require(
-            payloads.reduce(into: Int64(0)) { $0 += Int64($1.data.count) },
-            at: destDir,
-            for: payloads.count == 1 ? "import this file" : "import these files",
-            files: files
-        )
-        for payload in payloads {
-            let dest: String
-            switch policy {
-            case .cancel:
-                return
-            case .keepBoth:
-                dest = files.uniqueDestination(in: destDir, preferredName: payload.name)
-            case .replace:
-                let preferred = files.preferredDestination(in: destDir, preferredName: payload.name)
-                switch files.existingKind(at: preferred) {
-                case .directory:
-                    dest = files.uniqueDestination(in: destDir, preferredName: payload.name)
-                case .none, .file:
-                    dest = preferred
-                }
-            }
-            try Self.assertPath(dest, under: destDir)
-            try files.writeFile(data: payload.data, to: dest)
-        }
-    }
-
-    func export(item: FileItem) {
-        isExporting = true
-        busyTitle = "Preparing…"
-        exportError = nil
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                let dest = try Self.shareStagingURL(named: Self.shareName(for: item))
-                try self.escape.withHandle(for: self.app.containerPath) { _ in
-                    try SpaceCheck.require(
-                        self.files.totalBytes(of: [item]),
-                        at: dest.deletingLastPathComponent().path,
-                        for: "prepare this for sharing",
-                        files: self.files
-                    )
-                    if item.isDirectory {
-                        let zip = ZipWriter()
-                        try zip.begin(at: dest)
-                        do {
-                            try zip.addItems([item], files: self.files, skipPath: dest.path)
-                            try zip.finish()
-                        } catch {
-                            try? zip.finish()
-                            throw error
-                        }
-                    } else {
-                        let data = try self.files.readFile(at: item.path)
-                        try data.write(to: dest, options: .atomic)
-                    }
-                }
-                DispatchQueue.main.async {
-                    self.isExporting = false
-                    self.sharePayload = SharePayload(url: dest)
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.isExporting = false
-                    self.exportError = IdentifiedError(message: error.localizedDescription)
-                }
-            }
-        }
-    }
-
-    func zip(items: [FileItem]) {
-        guard !items.isEmpty, !isZipping else { return }
-        isZipping = true
-        busyTitle = items.count == 1 ? "Compressing…" : "Compressing \(items.count) items…"
-        operationError = nil
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                let destPath: String = try self.escape.withHandle(for: self.app.containerPath) { _ in
-                    // Raw size is the worst case (already-compressed data barely shrinks); checking it
-                    // up front beats failing after a long wait.
-                    try SpaceCheck.require(
-                        self.files.totalBytes(of: items),
-                        at: self.currentPath,
-                        for: items.count == 1 ? "compress this item" : "compress these items",
-                        files: self.files
-                    )
-                    let dest = self.files.uniqueDestination(
-                        in: self.currentPath,
-                        preferredName: Self.zipName(for: items)
-                    )
-                    let zip = ZipWriter()
-                    try zip.begin(at: URL(fileURLWithPath: dest))
-                    do {
-                        try zip.addItems(items, files: self.files, skipPath: dest)
-                        try zip.finish()
-                    } catch {
-                        try? zip.finish()
-                        try? FileManager.default.removeItem(atPath: dest)
-                        throw error
-                    }
-                    return dest
-                }
-                DispatchQueue.main.async {
-                    self.isZipping = false
-                    let name = (destPath as NSString).lastPathComponent
-                    CopyFeedback.shared.show("Created “\(name)”")
-                    self.open(self.currentPath)
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.isZipping = false
-                    self.operationError = IdentifiedError(message: error.localizedDescription)
-                }
-            }
-        }
-    }
-
-    func clearUnzipPasswordPrompt() {
-        unzipPasswordItem = nil
-        unzipPasswordMessage = "This archive is password-protected. Enter the password to extract it."
-    }
-
-    func unzip(item: FileItem, password: String? = nil) {
-        guard !isZipping else { return }
-        isZipping = true
-        busyTitle = "Extracting…"
-        operationError = nil
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                let destName: String = try self.escape.withHandle(for: self.app.containerPath) { _ in
-                    let bytes = try self.files.readFile(at: item.path)
-                    if ArchiveExtractor.archiveNeedsPassword(bytes, name: item.name),
-                       password == nil || password?.isEmpty == true {
-                        throw ZipReaderError.passwordRequired
-                    }
-                    let preferred = ArchiveExtractor.folderName(from: item.name)
-                    let dest = self.files.uniqueDestination(
-                        in: self.currentPath,
-                        preferredName: preferred.isEmpty ? "Archive" : preferred
-                    )
-                    do {
-                        try ArchiveExtractor.extract(
-                            data: bytes,
-                            originalName: item.name,
-                            into: dest,
-                            files: self.files,
-                            password: password
-                        )
-                    } catch {
-                        try? FileManager.default.removeItem(atPath: dest)
-                        throw error
-                    }
-                    return (dest as NSString).lastPathComponent
-                }
-                DispatchQueue.main.async {
-                    self.isZipping = false
-                    self.clearUnzipPasswordPrompt()
-                    CopyFeedback.shared.show("Extracted to “\(destName)”")
-                    self.open(self.currentPath)
-                }
-            } catch ZipReaderError.passwordRequired {
-                DispatchQueue.main.async {
-                    self.isZipping = false
-                    self.unzipPasswordMessage = "This archive is password-protected. Enter the password to extract it."
-                    self.unzipPasswordItem = item
-                }
-            } catch ZipReaderError.wrongPassword {
-                DispatchQueue.main.async {
-                    self.isZipping = false
-                    self.unzipPasswordMessage = "Wrong password. Try again."
-                    self.unzipPasswordItem = item
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.isZipping = false
-                    self.operationError = IdentifiedError(message: error.localizedDescription)
-                }
-            }
-        }
-    }
-
-    private static func zipName(for items: [FileItem]) -> String {
-        if items.count == 1 {
-            let name = items[0].name
-            let ns = name as NSString
-            if ns.pathExtension.lowercased() == "zip" {
-                return "\(ns.deletingPathExtension) archive.zip"
-            }
-            return "\(name).zip"
-        }
-        return "Archive.zip"
-    }
-
-    private static func shareName(for item: FileItem) -> String {
-        if item.isDirectory {
-            return "\(item.name).zip"
-        }
-        return item.name
-    }
-
-    /// Stage a share file under its original name, in a folder of its own inside the temporary
-    /// directory. It used to be written straight into EscapeOS's Documents, replacing whatever had
-    /// that name, so sharing a file called `Backups` or `pairingFile.plist` deleted EscapeOS's own
-    /// backups or pairing file. Folders from earlier shares are swept first.
-    private static func shareStagingURL(named name: String) throws -> URL {
-        let fm = FileManager.default
-        let root = fm.temporaryDirectory
-        for leftover in (try? fm.contentsOfDirectory(atPath: root.path)) ?? [] where leftover.hasPrefix("escapeos-share-") {
-            try? fm.removeItem(at: root.appendingPathComponent(leftover))
-        }
-        let folder = root.appendingPathComponent("escapeos-share-\(UUID().uuidString)", isDirectory: true)
-        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-        let safe = name
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: ":", with: "-")
-        return folder.appendingPathComponent(safe)
-    }
-
-    private func mutate(_ body: @escaping () throws -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                try self.escape.withHandle(for: self.app.containerPath) { _ in
-                    try body()
-                }
-                DispatchQueue.main.async {
-                    self.open(self.currentPath)
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.operationError = IdentifiedError(message: error.localizedDescription)
-                }
-            }
-        }
-    }
-}
-
-struct SharePayload: Identifiable {
-    let id = UUID()
-    let url: URL
-}
-
-struct IdentifiedError: Identifiable {
-    let id = UUID()
-    let message: String
-}
-
-/// Bytes picked from Files, still named as the source file.
-struct ImportPayload {
-    let name: String
-    let data: Data
-}
-
-/// Import waiting on Replace / Keep Both / Cancel because names already exist.
-struct PendingImportPrompt: Identifiable {
-    let id = UUID()
-    let destDir: String
-    let payloads: [ImportPayload]
-    let collidingFileNames: [String]
-    let collidingFolderNames: [String]
-}
-
-struct ActivityShareView: UIViewControllerRepresentable {
-    let url: URL
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: [url], applicationActivities: nil)
-    }
-
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

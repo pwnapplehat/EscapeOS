@@ -9,6 +9,8 @@ enum FileOpenMode: String, Hashable {
     case image
     case pdf
     case media
+    /// Browse and edit a SQLite database (issue #8).
+    case database
 }
 
 /// Classifies a file by extension for icons and default open behavior.
@@ -57,6 +59,14 @@ enum FileContentKind: String {
         if databaseExtensions.contains(ext) { return .database }
         if textExtensions.contains(ext) { return .text }
         return .binary
+    }
+
+    /// Names that open as a SQLite database. `.wal` and `.shm` belong to one but are not databases,
+    /// and `.realm` is a different format, so those stay as hex.
+    static let sqliteExtensions: Set<String> = ["db", "sqlite", "sqlite3", "db3", "sqlitedb"]
+
+    static func opensAsDatabase(name: String) -> Bool {
+        sqliteExtensions.contains((name as NSString).pathExtension.lowercased())
     }
 
     static let imageExtensions: Set<String> = [

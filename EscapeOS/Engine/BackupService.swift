@@ -46,15 +46,22 @@ final class BackupService {
     private let files = FileService()
 
     /// Subtrees of a Data container we export and restore.
-    static let backupRoots = ["Documents", "Library", "tmp"]
+    static let backupRoots = BackupSelection.allowedRoots
 
     /// Maximum number of files / total bytes as a safety guard.
     private let maxFiles = 5000
     private let maxTotalBytes: Int64 = 512 * 1024 * 1024
 
     /// Export the given app's container to a zip inside Documents/Backups.
+    ///
+    /// - Parameters:
+    ///   - selection: back up only these files and folders (issue #7). Nil backs up everything.
+    ///   - estimate: told, once and before anything is written, roughly how many bytes there are
+    ///     to back up, so progress can be a percentage. A lower bound on a very large tree.
     func exportBackup(
         for app: InstalledApp,
+        selection: BackupSelection? = nil,
+        estimate: ((Int64) -> Void)? = nil,
         progress: BackupProgress? = nil,
         isCancelled: @escaping () -> Bool = { false }
     ) throws -> BackupResult {
@@ -65,7 +72,8 @@ final class BackupService {
             with: "_",
             options: .regularExpression
         )
-        let outURL = backupsDir.appendingPathComponent("\(safeName)_backup_\(stamp).zip")
+        let kind = selection == nil ? "backup" : "partial"
+        let outURL = backupsDir.appendingPathComponent("\(safeName)_\(kind)_\(stamp).zip")
 
         var manifest: [BackupManifestEntry] = []
         var totalBytes: Int64 = 0
@@ -84,11 +92,19 @@ final class BackupService {
                 // anyway, so that is the most this can need. The walk is bounded, so a container with
                 // a huge cache cannot stall the start; a partial total can only refuse, never allow.
                 var needed: Int64 = 0
-                for root in Self.backupRoots {
-                    let rootPath = (app.containerPath as NSString).appendingPathComponent(root)
-                    if files.isDirectory(at: rootPath) { needed += files.treeBytes(at: rootPath, maxNodes: 100_000) }
+                if let selection {
+                    for path in selection.paths {
+                        let absolute = (app.containerPath as NSString).appendingPathComponent(path)
+                        needed += files.treeBytes(at: absolute, maxNodes: 100_000)
+                    }
+                } else {
+                    for root in Self.backupRoots {
+                        let rootPath = (app.containerPath as NSString).appendingPathComponent(root)
+                        if files.isDirectory(at: rootPath) { needed += files.treeBytes(at: rootPath, maxNodes: 100_000) }
+                    }
                 }
                 needed = min(needed, maxTotalBytes)
+                estimate?(needed)
                 if case .notEnough(let need, let available) = SpaceCheck.verdict(
                     needed: needed,
                     available: files.availableCapacity(at: backupsDir.path)
@@ -97,26 +113,67 @@ final class BackupService {
                         SpaceCheck.message(for: "back up this app", needed: need, available: available)
                     )
                 }
-                var foundRoot = false
-                for root in Self.backupRoots {
-                    if isCancelled() { throw BackupError.cancelled }
-                    let rootPath = (app.containerPath as NSString).appendingPathComponent(root)
-                    guard files.isDirectory(at: rootPath) else { continue }
-                    foundRoot = true
-                    try walk(
-                        path: rootPath,
-                        relativePrefix: root,
-                        zip: zip,
-                        manifest: &manifest,
-                        totalBytes: &totalBytes,
-                        progress: progress,
-                        isCancelled: isCancelled
-                    )
-                }
-                if !foundRoot {
-                    throw BackupError.containerInaccessible(
-                        "Documents, Library, and tmp were not visible after opening \(app.containerPath)"
-                    )
+                if let selection {
+                    var foundAny = false
+                    for relative in selection.paths {
+                        if isCancelled() { throw BackupError.cancelled }
+                        let absolute = (app.containerPath as NSString).appendingPathComponent(relative)
+                        // Chosen a moment ago, so it can have gone since; a link is never followed.
+                        guard let type = (try? files.attributes(at: absolute))?[.type] as? FileAttributeType else { continue }
+                        if type == FileAttributeType.typeDirectory {
+                            foundAny = true
+                            try walk(
+                                path: absolute,
+                                relativePrefix: relative,
+                                zip: zip,
+                                manifest: &manifest,
+                                totalBytes: &totalBytes,
+                                progress: progress,
+                                isCancelled: isCancelled
+                            )
+                        } else if type == FileAttributeType.typeRegular {
+                            foundAny = true
+                            // A folder is checked as the walk enters it; a chosen file is checked here.
+                            if manifest.count >= maxFiles || totalBytes > maxTotalBytes {
+                                throw BackupError.writeFailed("Safety limit exceeded (too many files or too much data).")
+                            }
+                            try addFileEntry(
+                                path: absolute,
+                                relative: relative,
+                                zip: zip,
+                                manifest: &manifest,
+                                totalBytes: &totalBytes,
+                                progress: progress
+                            )
+                        }
+                    }
+                    if !foundAny {
+                        throw BackupError.containerInaccessible(
+                            "None of the chosen files or folders could be found in the app's data any more."
+                        )
+                    }
+                } else {
+                    var foundRoot = false
+                    for root in Self.backupRoots {
+                        if isCancelled() { throw BackupError.cancelled }
+                        let rootPath = (app.containerPath as NSString).appendingPathComponent(root)
+                        guard files.isDirectory(at: rootPath) else { continue }
+                        foundRoot = true
+                        try walk(
+                            path: rootPath,
+                            relativePrefix: root,
+                            zip: zip,
+                            manifest: &manifest,
+                            totalBytes: &totalBytes,
+                            progress: progress,
+                            isCancelled: isCancelled
+                        )
+                    }
+                    if !foundRoot {
+                        throw BackupError.containerInaccessible(
+                            "Documents, Library, and tmp were not visible after opening \(app.containerPath)"
+                        )
+                    }
                 }
             }
         } catch let error as BackupError {
@@ -143,7 +200,9 @@ final class BackupService {
             fileCount: manifest.count,
             totalBytes: totalBytes,
             manifestSHA256: manifestHash,
-            escapeOSVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
+            escapeOSVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0",
+            isPartial: selection == nil ? nil : true,
+            scope: selection?.paths
         )
         let metadataData = try encoder.encode(metadata)
         try zip.addFile(name: BackupPaths.metadataFileName, data: metadataData)
@@ -200,19 +259,38 @@ final class BackupService {
                     isCancelled: isCancelled
                 )
             } else if entry.kind == .regular {
-                let data: Data
-                do {
-                    data = try files.readFile(at: entry.path)
-                } catch {
-                    continue
-                }
-
-                let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-                try zip.addFile(name: rel, data: data)
-                manifest.append(BackupManifestEntry(path: rel, size: data.count, sha256: hash))
-                totalBytes += Int64(data.count)
-                progress?(manifest.count, totalBytes, rel)
+                try addFileEntry(
+                    path: entry.path,
+                    relative: rel,
+                    zip: zip,
+                    manifest: &manifest,
+                    totalBytes: &totalBytes,
+                    progress: progress
+                )
             }
         }
+    }
+
+    /// Read one file, record its hash in the manifest and add it to the archive. A file that cannot
+    /// be read is skipped, as it always was, so one locked file does not stop the whole backup.
+    private func addFileEntry(
+        path: String,
+        relative rel: String,
+        zip: ZipWriter,
+        manifest: inout [BackupManifestEntry],
+        totalBytes: inout Int64,
+        progress: BackupProgress?
+    ) throws {
+        let data: Data
+        do {
+            data = try files.readFile(at: path)
+        } catch {
+            return
+        }
+        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        try zip.addFile(name: rel, data: data)
+        manifest.append(BackupManifestEntry(path: rel, size: data.count, sha256: hash))
+        totalBytes += Int64(data.count)
+        progress?(manifest.count, totalBytes, rel)
     }
 }

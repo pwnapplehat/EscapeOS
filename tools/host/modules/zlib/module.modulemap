@@ -1,0 +1,7 @@
+// Host-only: the iOS SDK ships a `zlib` module, a Linux host does not. This gives the host tests
+// the same module name so ZipReader / ZipWriter compile unchanged.
+module zlib [system] {
+    header "zlib_shim.h"
+    link "z"
+    export *
+}

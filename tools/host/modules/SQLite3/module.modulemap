@@ -1,0 +1,7 @@
+// Host-only: the iOS SDK ships a `SQLite3` module, a Linux host does not. Same name here so the
+// database code compiles unchanged for the host tests.
+module SQLite3 [system] {
+    header "sqlite3_shim.h"
+    link "sqlite3"
+    export *
+}

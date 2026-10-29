@@ -13,6 +13,15 @@ struct FileViewerView: View {
     @StateObject private var vm = FileViewerViewModel()
 
     var body: some View {
+        // A database is never read into memory whole: it is copied to a private place and opened there.
+        if mode == .database || (mode == .auto && FileContentKind.opensAsDatabase(name: item.name)) {
+            SQLiteViewerView(app: app, item: item)
+        } else {
+            viewer
+        }
+    }
+
+    private var viewer: some View {
         Group {
             if vm.isLoading {
                 ProgressView("Opening…")
@@ -82,7 +91,7 @@ struct FileViewerView: View {
             }
         case .text:
             TextFileEditorView(vm: vm)
-        case .hex, .auto:
+        case .hex, .auto, .database:
             HexEditorView(vm: vm)
         }
     }

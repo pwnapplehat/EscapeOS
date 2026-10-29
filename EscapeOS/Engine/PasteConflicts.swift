@@ -108,6 +108,7 @@ extension FileService {
         into destDir: String,
         policy: ImportNamePolicy,
         move: Bool,
+        observer: TransferObserver = .none,
         swap: (String, String) -> Int32 = { rename($0, $1) }
     ) throws -> String? {
         if policy == .cancel { return nil }
@@ -126,13 +127,13 @@ extension FileService {
         }
 
         if !replacing {
-            if move { try moveItem(at: source, to: destination) } else { try copyItem(at: source, to: destination) }
+            try transfer(source, to: destination, move: move, observer: observer)
             return destination
         }
 
         let staged = (destDir as NSString).appendingPathComponent(".escapeos-replace-\(UUID().uuidString)")
         do {
-            if move { try moveItem(at: source, to: staged) } else { try copyItem(at: source, to: staged) }
+            try transfer(source, to: staged, move: move, observer: observer)
         } catch {
             // A copy can stop part-way (out of space). Never leave a hidden half-file in the folder.
             restoreAfterFailedStage(staged: staged, source: source)
@@ -144,6 +145,15 @@ extension FileService {
             throw FileServiceError.operationFailed("Could not replace “\((destination as NSString).lastPathComponent)”: \(reason)")
         }
         return destination
+    }
+
+    /// Copy or move with progress and cancel, through the streaming copier.
+    private func transfer(_ source: String, to destination: String, move: Bool, observer: TransferObserver) throws {
+        if move {
+            try moveTree(from: source, to: destination, observer: observer)
+        } else {
+            try copyTree(from: source, to: destination, observer: observer)
+        }
     }
 
     /// Undo a Replace that could not finish: drop a leftover staged copy, or, if the original was

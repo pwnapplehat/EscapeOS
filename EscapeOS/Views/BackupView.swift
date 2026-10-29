@@ -1,6 +1,9 @@
 import SwiftUI
 
-/// Shared backup progress controller used from the per-app detail screen.
+/// Backup progress controller used from the per-app detail screen.
+///
+/// The backup runs as a job on `OperationCenter`, so it waits its turn behind other long operations,
+/// shows a percentage, speed and time left in the bar, and can be cancelled from there or here.
 final class BackupViewModel: ObservableObject {
     enum State {
         case idle
@@ -12,7 +15,7 @@ final class BackupViewModel: ObservableObject {
     @Published var state: State = .idle
 
     private let service = BackupService()
-    private var cancelled = false
+    private var jobID: UUID?
 
     var isBusy: Bool {
         if case .running = state { return true }
@@ -20,32 +23,53 @@ final class BackupViewModel: ObservableObject {
     }
 
     func start(app: InstalledApp, onFinished: (() -> Void)? = nil) {
-        cancelled = false
-        state = .running(files: 0, bytes: 0, current: "Starting…")
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                let result = try self.service.exportBackup(
-                    for: app,
-                    progress: { files, bytes, current in
-                        DispatchQueue.main.async {
-                            self.state = .running(files: files, bytes: bytes, current: current)
-                        }
-                    },
-                    isCancelled: { self.cancelled }
-                )
-                DispatchQueue.main.async {
-                    self.state = .done(result)
-                    onFinished?()
+        guard !isBusy else { return }
+        state = .running(files: 0, bytes: 0, current: "Waiting…")
+        let result = Box<BackupResult>()
+        jobID = OperationCenter.shared.submit(
+            "Backing up \(app.name)",
+            kind: .heavy,
+            scope: app.containerPath,
+            work: { context in
+                DispatchQueue.main.async { self.state = .running(files: 0, bytes: 0, current: "Starting…") }
+                do {
+                    result.value = try self.service.exportBackup(
+                        for: app,
+                        estimate: { context.meter.setTotals(bytes: $0) },
+                        progress: { files, bytes, current in
+                            context.meter.set(bytesDone: bytes)
+                            context.meter.setDetail(current)
+                            DispatchQueue.main.async {
+                                self.state = .running(files: files, bytes: bytes, current: current)
+                            }
+                        },
+                        isCancelled: { context.isCancelled }
+                    )
+                } catch BackupError.cancelled {
+                    throw JobCancelled()
                 }
-            } catch {
-                DispatchQueue.main.async {
+                return nil
+            },
+            finish: { outcome in
+                self.jobID = nil
+                switch outcome {
+                case .done:
+                    if let value = result.value {
+                        self.state = .done(value)
+                        onFinished?()
+                    } else {
+                        self.state = .idle
+                    }
+                case .failed(let error):
                     self.state = .failed(error.localizedDescription)
+                case .cancelled:
+                    self.state = .idle
                 }
             }
-        }
+        )
     }
 
     func cancel() {
-        cancelled = true
+        if let jobID { OperationCenter.shared.cancel(jobID) }
     }
 }

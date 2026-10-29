@@ -1,0 +1,5 @@
+// Host-only: Glibc's Swift module does not expose <sys/xattr.h>. On iOS the same calls come from Darwin.
+module CXattr [system] {
+    header "xattr_shim.h"
+    export *
+}

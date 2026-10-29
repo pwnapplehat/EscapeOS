@@ -14,6 +14,10 @@ struct RootView: View {
     @AppStorage("HasAcknowledgedLimits") private var hasAcknowledgedLimits = false
     @State private var selectedTab: MainTab = .apps
     @ObservedObject private var copyFeedback = CopyFeedback.shared
+    @ObservedObject private var operations = OperationCenter.shared
+
+    /// Leftover temporary folders are cleared once per launch, before anything can be using them.
+    private static var didTidy = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -56,7 +60,7 @@ struct RootView: View {
             .tag(MainTab.backups)
 
             NavigationView {
-                SettingsForm(onResetPairing: {
+                SettingsForm(appList: viewModel, onResetPairing: {
                     viewModel.resetPairing()
                     selectedTab = .apps
                 })
@@ -68,7 +72,11 @@ struct RootView: View {
             }
             .tag(MainTab.settings)
         }
-        .overlay(CopyBanner(message: copyFeedback.message))
+        .overlay(CopyBanner(message: copyFeedback.message, lift: operations.jobs.isEmpty ? 0 : 96))
+        .overlay(alignment: .bottom) {
+            OperationsBar(center: operations)
+                .padding(.bottom, 58)
+        }
         .sheet(isPresented: Binding(
             get: { !hasAcknowledgedLimits },
             set: { if !$0 { hasAcknowledgedLimits = true } }
@@ -81,6 +89,15 @@ struct RootView: View {
         .onAppear {
             if hasAcknowledgedLimits {
                 viewModel.reload()
+            }
+            if !Self.didTidy {
+                Self.didTidy = true
+                DispatchQueue.global(qos: .utility).async {
+                    TrashStore.standard().recoverInterrupted()
+                    ShareStaging.sweepLeftovers()
+                    ImportStaging.sweepLeftovers()
+                    SQLiteWorkingCopy.sweepLeftovers()
+                }
             }
         }
         .onChange(of: hasAcknowledgedLimits) { acknowledged in
@@ -281,9 +298,12 @@ struct EmptyStateView: View {
 
 /// Settings form embedded in the Settings tab.
 struct SettingsForm: View {
+    @ObservedObject var appList: AppListViewModel
     var onResetPairing: () -> Void
     @AppStorage("TunnelDeviceIP") private var tunnelIP: String = "10.7.0.1"
     @AppStorage(DeleteConfirmation.preferenceKey) private var confirmFileDeletes = true
+    @AppStorage(TrashPreference.key) private var useTrash = true
+    @StateObject private var trashSummary = TrashSummaryModel()
 
     var body: some View {
         Form {
@@ -294,8 +314,19 @@ struct SettingsForm: View {
                     .disableAutocorrection(true)
             }
 
-            Section(header: Text("Deleting"), footer: Text("Folders always ask first, because they take everything inside them.")) {
+            Section(header: Text("Deleting"), footer: Text("Folders always ask first, because they take everything inside them. With the Trash on, deleted items are kept in EscapeOS (Files, On My iPhone, EscapeOS, Trash) and take up space until you empty it.")) {
                 Toggle("Confirm before deleting files", isOn: $confirmFileDeletes)
+                Toggle("Move deleted items to the Trash", isOn: $useTrash)
+                NavigationLink {
+                    TrashView(apps: appList.apps)
+                } label: {
+                    HStack {
+                        Text("Trash")
+                        Spacer()
+                        Text(trashSummary.text)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
 
             Section {
@@ -318,6 +349,7 @@ struct SettingsForm: View {
                     .foregroundColor(.secondary)
             }
         }
+        .onAppear { trashSummary.reload() }
     }
 
     private static var aboutLine: String {

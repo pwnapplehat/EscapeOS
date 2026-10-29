@@ -68,29 +68,31 @@ enum ArchiveExtractor {
         originalName: String,
         into destDir: String,
         files: FileService,
-        password: String?
+        password: String?,
+        observer: TransferObserver = .none
     ) throws {
         let kind = kind(of: data, name: originalName)
         switch kind {
         case .zip:
-            try extractZip(data, into: destDir, files: files, password: password)
+            try extractZip(data, into: destDir, files: files, password: password, observer: observer)
         case .sevenZip:
-            try extractSevenZip(data, into: destDir, files: files, password: password)
+            try extractSevenZip(data, into: destDir, files: files, password: password, observer: observer)
         case .tar:
-            try extractTar(data, into: destDir, files: files)
+            try extractTar(data, into: destDir, files: files, observer: observer)
         case .gzip:
-            try extractGzip(data, originalName: originalName, into: destDir, files: files)
+            try extractGzip(data, originalName: originalName, into: destDir, files: files, observer: observer)
         case .bzip2:
-            try extractBzip2(data, originalName: originalName, into: destDir, files: files)
+            try extractBzip2(data, originalName: originalName, into: destDir, files: files, observer: observer)
         case .xz:
-            try extractXZ(data, originalName: originalName, into: destDir, files: files)
+            try extractXZ(data, originalName: originalName, into: destDir, files: files, observer: observer)
         case .lz4:
             try extractLayer(
                 try LZ4.decompress(data: data),
                 originalName: originalName,
                 dropping: "lz4",
                 into: destDir,
-                files: files
+                files: files,
+                observer: observer
             )
         case .lzma:
             try extractLayer(
@@ -98,10 +100,11 @@ enum ArchiveExtractor {
                 originalName: originalName,
                 dropping: "lzma",
                 into: destDir,
-                files: files
+                files: files,
+                observer: observer
             )
         case .deb:
-            try extractDeb(data, into: destDir, files: files)
+            try extractDeb(data, into: destDir, files: files, observer: observer)
         case .rar:
             throw FileServiceError.operationFailed(
                 "RAR isn’t supported. Save it as zip, 7z, or tar.gz and extract that."
@@ -123,18 +126,18 @@ enum ArchiveExtractor {
         return base.isEmpty ? "Archive" : base
     }
 
-    private static func extractZip(_ data: Data, into dest: String, files: FileService, password: String?) throws {
+    private static func extractZip(_ data: Data, into dest: String, files: FileService, password: String?, observer: TransferObserver) throws {
         if let password, !password.isEmpty,
            let reader = try? ZipReader(data: data), reader.needsPassword {
-            try reader.extract(into: dest, files: files, password: password)
+            try reader.extract(into: dest, files: files, password: password, observer: observer)
             return
         }
         do {
             let entries = try ZipContainer.open(container: data)
-            try writeContainer(entries.map { ($0.info.name, $0.info.type, $0.data) }, into: dest, files: files)
+            try writeContainer(entries.map { ($0.info.name, $0.info.type, $0.data) }, into: dest, files: files, observer: observer)
         } catch ZipError.encryptionNotSupported {
             guard let password, !password.isEmpty else { throw ZipReaderError.passwordRequired }
-            try ZipReader(data: data).extract(into: dest, files: files, password: password)
+            try ZipReader(data: data).extract(into: dest, files: files, password: password, observer: observer)
         }
     }
 
@@ -142,7 +145,8 @@ enum ArchiveExtractor {
         _ data: Data,
         into dest: String,
         files: FileService,
-        password: String?
+        password: String?,
+        observer: TransferObserver
     ) throws {
         let supplied = password?.isEmpty == false
         SevenZipAES.password = supplied ? password : nil
@@ -174,43 +178,43 @@ enum ArchiveExtractor {
             if supplied { throw ZipReaderError.wrongPassword }
             throw error
         }
-        try writeContainer(entries.map { ($0.info.name, $0.info.type, $0.data) }, into: dest, files: files)
+        try writeContainer(entries.map { ($0.info.name, $0.info.type, $0.data) }, into: dest, files: files, observer: observer)
     }
 
-    private static func extractTar(_ data: Data, into dest: String, files: FileService) throws {
+    private static func extractTar(_ data: Data, into dest: String, files: FileService, observer: TransferObserver) throws {
         let entries = try TarContainer.open(container: data)
-        try writeContainer(entries.map { ($0.info.name, $0.info.type, $0.data) }, into: dest, files: files)
+        try writeContainer(entries.map { ($0.info.name, $0.info.type, $0.data) }, into: dest, files: files, observer: observer)
     }
 
-    private static func extractGzip(_ data: Data, originalName: String, into dest: String, files: FileService) throws {
+    private static func extractGzip(_ data: Data, originalName: String, into dest: String, files: FileService, observer: TransferObserver) throws {
         let plain = try GzipArchive.unarchive(archive: data)
         if isTar(plain) || originalName.lowercased().contains(".tar.") || originalName.lowercased().hasSuffix(".tgz") {
-            try extractTar(plain, into: dest, files: files)
+            try extractTar(plain, into: dest, files: files, observer: observer)
             return
         }
         let header = try? GzipHeader(archive: data)
         let outName = header?.fileName ?? strippedName(originalName, dropping: "gz")
-        try writeSingleNamed(plain, as: outName, into: dest, files: files)
+        try writeSingleNamed(plain, as: outName, into: dest, files: files, observer: observer)
     }
 
-    private static func extractBzip2(_ data: Data, originalName: String, into dest: String, files: FileService) throws {
+    private static func extractBzip2(_ data: Data, originalName: String, into dest: String, files: FileService, observer: TransferObserver) throws {
         let plain = try BZip2.decompress(data: data)
         let lower = originalName.lowercased()
         if isTar(plain) || lower.contains(".tar.") || lower.hasSuffix(".tbz") || lower.hasSuffix(".tbz2") {
-            try extractTar(plain, into: dest, files: files)
+            try extractTar(plain, into: dest, files: files, observer: observer)
             return
         }
-        try writeSingleFile(plain, originalName: originalName, dropping: "bz2", into: dest, files: files)
+        try writeSingleFile(plain, originalName: originalName, dropping: "bz2", into: dest, files: files, observer: observer)
     }
 
-    private static func extractXZ(_ data: Data, originalName: String, into dest: String, files: FileService) throws {
+    private static func extractXZ(_ data: Data, originalName: String, into dest: String, files: FileService, observer: TransferObserver) throws {
         let plain = try XZArchive.unarchive(archive: data)
         let lower = originalName.lowercased()
         if isTar(plain) || lower.contains(".tar.") || lower.hasSuffix(".txz") {
-            try extractTar(plain, into: dest, files: files)
+            try extractTar(plain, into: dest, files: files, observer: observer)
             return
         }
-        try writeSingleFile(plain, originalName: originalName, dropping: "xz", into: dest, files: files)
+        try writeSingleFile(plain, originalName: originalName, dropping: "xz", into: dest, files: files, observer: observer)
     }
 
     private static func extractLayer(
@@ -218,31 +222,32 @@ enum ArchiveExtractor {
         originalName: String,
         dropping ext: String,
         into destDir: String,
-        files: FileService
+        files: FileService,
+        observer: TransferObserver
     ) throws {
         let lower = originalName.lowercased()
         if isTar(plain) || lower.contains(".tar.") {
-            try extractTar(plain, into: destDir, files: files)
+            try extractTar(plain, into: destDir, files: files, observer: observer)
             return
         }
-        try writeSingleFile(plain, originalName: originalName, dropping: ext, into: destDir, files: files)
+        try writeSingleFile(plain, originalName: originalName, dropping: ext, into: destDir, files: files, observer: observer)
     }
 
-    private static func extractDeb(_ data: Data, into dest: String, files: FileService) throws {
+    private static func extractDeb(_ data: Data, into dest: String, files: FileService, observer: TransferObserver) throws {
         guard let payload = try arMember(namedPrefix: "data.tar", in: data) else {
             throw FileServiceError.operationFailed("No data.tar inside this .deb.")
         }
         let innerKind = kind(of: payload, name: "data.tar")
         switch innerKind {
-        case .gzip: try extractGzip(payload, originalName: "data.tar.gz", into: dest, files: files)
-        case .xz: try extractXZ(payload, originalName: "data.tar.xz", into: dest, files: files)
-        case .bzip2: try extractBzip2(payload, originalName: "data.tar.bz2", into: dest, files: files)
-        case .lz4: try extractLayer(try LZ4.decompress(data: payload), originalName: "data.tar.lz4", dropping: "lz4", into: dest, files: files)
-        case .lzma: try extractLayer(try LZMA.decompress(data: payload), originalName: "data.tar.lzma", dropping: "lzma", into: dest, files: files)
-        case .tar: try extractTar(payload, into: dest, files: files)
+        case .gzip: try extractGzip(payload, originalName: "data.tar.gz", into: dest, files: files, observer: observer)
+        case .xz: try extractXZ(payload, originalName: "data.tar.xz", into: dest, files: files, observer: observer)
+        case .bzip2: try extractBzip2(payload, originalName: "data.tar.bz2", into: dest, files: files, observer: observer)
+        case .lz4: try extractLayer(try LZ4.decompress(data: payload), originalName: "data.tar.lz4", dropping: "lz4", into: dest, files: files, observer: observer)
+        case .lzma: try extractLayer(try LZMA.decompress(data: payload), originalName: "data.tar.lzma", dropping: "lzma", into: dest, files: files, observer: observer)
+        case .tar: try extractTar(payload, into: dest, files: files, observer: observer)
         default:
             if isTar(payload) {
-                try extractTar(payload, into: dest, files: files)
+                try extractTar(payload, into: dest, files: files, observer: observer)
             } else {
                 throw FileServiceError.operationFailed("Unsupported data.tar compression in this .deb.")
             }
@@ -252,13 +257,16 @@ enum ArchiveExtractor {
     private static func writeContainer(
         _ entries: [(name: String, type: ContainerEntryType, data: Data?)],
         into destDir: String,
-        files: FileService
+        files: FileService,
+        observer: TransferObserver
     ) throws {
         let root = (destDir as NSString).standardizingPath
         try files.createDirectory(at: root)
         var fileCount = 0
         var byteCount: Int64 = 0
+        observer.total(entries.reduce(Int64(0)) { $0 + Int64($1.data?.count ?? 0) })
         for entry in entries {
+            try observer.checkCancelled()
             if entry.name.isEmpty { continue }
             let resolved = try ArchiveEntryPath.resolve(entry.name, under: destDir)
             if entry.type == .directory || resolved.isDirectory {
@@ -274,7 +282,9 @@ enum ArchiveExtractor {
             if byteCount > 2_000_000_000 {
                 throw FileServiceError.operationFailed("Extracted data would be larger than 2 GB.")
             }
+            observer.detail((resolved.path as NSString).lastPathComponent)
             try files.writeFile(data: payload, to: resolved.path)
+            observer.bytes(Int64(payload.count))
         }
     }
 
@@ -283,19 +293,24 @@ enum ArchiveExtractor {
         originalName: String,
         dropping ext: String,
         into destDir: String,
-        files: FileService
+        files: FileService,
+        observer: TransferObserver
     ) throws {
-        try writeSingleNamed(data, as: strippedName(originalName, dropping: ext), into: destDir, files: files)
+        try writeSingleNamed(data, as: strippedName(originalName, dropping: ext), into: destDir, files: files, observer: observer)
     }
 
-    private static func writeSingleNamed(_ data: Data, as name: String, into destDir: String, files: FileService) throws {
+    private static func writeSingleNamed(_ data: Data, as name: String, into destDir: String, files: FileService, observer: TransferObserver) throws {
         try files.createDirectory(at: destDir)
         let leaf = (name as NSString).lastPathComponent
         guard FileNameRules.sanitize(leaf) != nil else {
             throw FileServiceError.operationFailed("Unsafe path in archive: \(name)")
         }
         let dest = files.uniqueDestination(in: destDir, preferredName: leaf)
+        observer.total(Int64(data.count))
+        try observer.checkCancelled()
+        observer.detail(leaf)
         try files.writeFile(data: data, to: dest)
+        observer.bytes(Int64(data.count))
     }
 
     private static func strippedName(_ original: String, dropping ext: String) -> String {

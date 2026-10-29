@@ -48,6 +48,9 @@ struct BackupsListView: View {
                             onRestore: {
                                 vm.beginRestore(record: record, apps: appList.apps)
                             },
+                            onChoose: {
+                                vm.beginChoosing(record: record, apps: appList.apps)
+                            },
                             onShare: {
                                 sharePayload = SharePayload(url: record.archiveURL)
                             }
@@ -78,6 +81,11 @@ struct BackupsListView: View {
         .sheet(item: $vm.activeRestore) { session in
             RestoreView(session: session, appList: appList)
         }
+        .sheet(item: $vm.picking) { record in
+            RestorePickerView(record: record) { selection, count, bytes in
+                vm.beginRestore(record: record, apps: appList.apps, selection: selection, count: count, bytes: bytes)
+            }
+        }
         .alert(item: $vm.alertError) { error in
             Alert(title: Text("Could Not Start Restore"), message: Text(error.message), dismissButton: .default(Text("OK")))
         }
@@ -97,7 +105,7 @@ struct BackupsListView: View {
             Text("The backup archive is permanently deleted from this device. This can’t be undone. Use Share / Save to Files first if you want to keep a copy.")
         }
         .sheet(item: $sharePayload) { payload in
-            ActivityShareView(url: payload.url)
+            ActivityShareView(urls: payload.urls)
         }
     }
 
@@ -114,6 +122,7 @@ private struct BackupRow: View {
     let icon: UIImage?
     let eligibility: RestoreEligibility
     let onRestore: () -> Void
+    let onChoose: () -> Void
     let onShare: () -> Void
 
     var body: some View {
@@ -129,6 +138,12 @@ private struct BackupRow: View {
                     Text(record.displaySubtitle)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
+                    if let scope = record.scopeSummary {
+                        Text(scope)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                    }
                     if let modified = record.modified {
                         Text(BackupPaths.displayStamp.string(from: modified))
                             .font(.caption2)
@@ -142,11 +157,20 @@ private struct BackupRow: View {
                 Button(action: onRestore) {
                     HStack(spacing: 8) {
                         Image(systemName: "arrow.counterclockwise.circle.fill")
-                        Text("Restore to Device")
+                        Text(record.metadata.isPartialBackup ? "Restore Everything in It" : "Restore to Device")
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                Button(action: onChoose) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checklist")
+                        Text("Choose What to Restore…")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+                .buttonStyle(.bordered)
                 .controlSize(.regular)
             case .appNotInstalled(_, let appName):
                 Label("\(appName) is not installed", systemImage: "app.badge.checkmark.fill")
@@ -286,14 +310,16 @@ struct RestoreView: View {
                 AppIconView(icon: appList.icons[app.bundleIdentifier], size: 64)
                     .padding(.top, 24)
 
-                Text("Restore to \(app.name)?")
+                Text(session.selection == nil ? "Restore to \(app.name)?" : "Restore the chosen items to \(app.name)?")
                     .font(.title3).bold()
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
 
                 VStack(alignment: .leading, spacing: 8) {
                     detailRow("App", app.name)
                     detailRow("Bundle ID", app.bundleIdentifier)
-                    detailRow("Files", "\(metadata.fileCount)")
-                    detailRow("Data", formatBytes(metadata.totalBytes))
+                    detailRow("Files", "\(session.selectedCount ?? metadata.fileCount)")
+                    detailRow("Data", formatBytes(session.selectedBytes ?? metadata.totalBytes))
                     detailRow("Backup", session.record.archiveFileName)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -308,7 +334,9 @@ struct RestoreView: View {
                             .font(.footnote)
                             .foregroundColor(.orange)
                     }
-                    Text("Existing files in Documents, Library, and tmp will be overwritten. Keychain data is never restored.")
+                    Text(session.selection == nil
+                         ? "Existing files in Documents, Library, and tmp will be overwritten. Keychain data is never restored."
+                         : "Only the chosen files are restored; each overwrites a file of the same name, and everything else in the app is left alone. A folder that is gone is recreated. Keychain data is never restored.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
@@ -317,7 +345,7 @@ struct RestoreView: View {
                 Button {
                     vm.start(session: session)
                 } label: {
-                    Text("Restore Backup")
+                    Text(session.selection == nil ? "Restore Backup" : "Restore Chosen Items")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -353,6 +381,10 @@ struct RestoreSession: Identifiable {
     let id = UUID()
     let record: BackupRecord
     let eligibility: RestoreEligibility
+    /// Restore only these files and folders (issue #7); nil restores everything in the backup.
+    var selection: BackupSelection? = nil
+    var selectedCount: Int? = nil
+    var selectedBytes: Int64? = nil
 }
 
 struct IdentifiedAlert: Identifiable {
@@ -365,6 +397,8 @@ final class BackupsListViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var activeRestore: RestoreSession?
+    /// The backup whose contents are being picked from.
+    @Published var picking: BackupRecord?
     @Published var alertError: IdentifiedAlert?
     @Published var deleteError: IdentifiedAlert?
 
@@ -394,11 +428,35 @@ final class BackupsListViewModel: ObservableObject {
         restoreService.eligibility(for: record, installedApps: apps)
     }
 
-    func beginRestore(record: BackupRecord, apps: [InstalledApp]) {
+    func beginChoosing(record: BackupRecord, apps: [InstalledApp]) {
+        // Say now, not after the picker, if the backup could not be restored anyway.
+        switch restoreService.eligibility(for: record, installedApps: apps) {
+        case .ready:
+            picking = record
+        case .appNotInstalled(_, let appName):
+            alertError = IdentifiedAlert(message: "\(appName) is not installed. Install the app before restoring this backup.")
+        case .invalidArchive(let message):
+            alertError = IdentifiedAlert(message: message)
+        }
+    }
+
+    func beginRestore(
+        record: BackupRecord,
+        apps: [InstalledApp],
+        selection: BackupSelection? = nil,
+        count: Int? = nil,
+        bytes: Int64? = nil
+    ) {
         let eligibility = restoreService.eligibility(for: record, installedApps: apps)
         switch eligibility {
         case .ready:
-            activeRestore = RestoreSession(record: record, eligibility: eligibility)
+            activeRestore = RestoreSession(
+                record: record,
+                eligibility: eligibility,
+                selection: selection,
+                selectedCount: count,
+                selectedBytes: bytes
+            )
         case .appNotInstalled(_, let appName):
             alertError = IdentifiedAlert(message: "\(appName) is not installed. Install the app before restoring this backup.")
         case .invalidArchive(let message):
@@ -438,50 +496,56 @@ final class RestoreViewModel: ObservableObject {
 
     @Published var state: State = .confirm
     private let service = RestoreService()
-    private var cancelled = false
+    private var jobID: UUID?
 
     func prepare(session: RestoreSession) {
-        cancelled = false
         state = .confirm
     }
 
     func start(session: RestoreSession) {
         guard case .ready(let app, _, _) = session.eligibility else { return }
-        cancelled = false
-        state = .running(current: "Starting…", done: 0, total: session.record.metadata.fileCount)
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                let result = try self.service.restore(
-                    record: session.record,
-                    to: app,
-                    progress: { done, total, current in
-                        DispatchQueue.main.async {
-                            self.state = .running(current: current, done: done, total: total)
-                        }
-                    },
-                    isCancelled: { self.cancelled }
-                )
-                DispatchQueue.main.async {
-                    self.state = .done(result)
+        if case .running = state { return }
+        state = .running(current: "Waiting…", done: 0, total: session.selectedCount ?? session.record.metadata.fileCount)
+        let outcome = Box<RestoreResult>()
+        jobID = OperationCenter.shared.submit(
+            "Restoring \(app.name)",
+            kind: .heavy,
+            scope: app.containerPath,
+            work: { context in
+                do {
+                    outcome.value = try self.service.restore(
+                        record: session.record,
+                        to: app,
+                        selection: session.selection,
+                        progress: { done, total, current in
+                            context.meter.setTotals(items: total)
+                            context.meter.setItems(done: done, detail: current)
+                            DispatchQueue.main.async {
+                                self.state = .running(current: current, done: done, total: total)
+                            }
+                        },
+                        isCancelled: { context.isCancelled }
+                    )
+                } catch BackupError.cancelled {
+                    throw JobCancelled()
                 }
-            } catch let error as BackupError {
-                DispatchQueue.main.async {
-                    if case .cancelled = error {
-                        self.state = .cancelled
-                    } else {
-                        self.state = .failed(error.localizedDescription)
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async {
+                return nil
+            },
+            finish: { result in
+                self.jobID = nil
+                switch result {
+                case .done:
+                    if let value = outcome.value { self.state = .done(value) } else { self.state = .cancelled }
+                case .failed(let error):
                     self.state = .failed(error.localizedDescription)
+                case .cancelled:
+                    self.state = .cancelled
                 }
             }
-        }
+        )
     }
 
     func cancel() {
-        cancelled = true
+        if let jobID { OperationCenter.shared.cancel(jobID) }
     }
 }

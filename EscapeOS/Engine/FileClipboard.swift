@@ -84,6 +84,8 @@ final class CopyFeedback: ObservableObject {
 
 struct CopyBanner: View {
     let message: String?
+    /// Extra room at the bottom, so the banner clears the operations bar when that is showing.
+    var lift: CGFloat = 0
 
     var body: some View {
         VStack {
@@ -95,7 +97,7 @@ struct CopyBanner: View {
                     .padding(.vertical, 12)
                     .background(.regularMaterial, in: Capsule())
                     .shadow(color: Color.black.opacity(0.18), radius: 8, y: 2)
-                    .padding(.bottom, 72)
+                    .padding(.bottom, 72 + lift)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
