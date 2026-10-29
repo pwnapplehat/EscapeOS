@@ -51,6 +51,11 @@ Setup: install the IPA, place the pairing file, connect LocalDevVPN, open a thro
 - [ ] Close the screen while a save is running: nothing breaks, and after it ends the file's tmp copy is gone (Settings shows no growth).
 - [ ] Open a file ending `.db` that is not a database: it says so and offers Open as Hex.
 
+## Backups of any size (0.2.1)
+- [ ] Back up an app with a lot of files (more than 5,000, or more than 512 MB): it finishes, the bar shows a percentage by size, and the Backups list shows the real file count.
+- [ ] Restore that backup (whole, and a chosen folder of it): it finishes and the files are back.
+- [ ] Cancel a backup of a big app part-way: the bar goes away and no partial zip is left in Backups.
+
 ## Regressions to look for
 - [ ] Paste across two apps, Cut and paste, Duplicate, Compress, Extract (zip, 7z, tar.gz), Import from Files, full Backup and Restore all still work.
 - [ ] Share a single file still opens the share sheet.

@@ -36,8 +36,8 @@ final class BackupViewModel: ObservableObject {
                     result.value = try self.service.exportBackup(
                         for: app,
                         estimate: { context.meter.setTotals(bytes: $0) },
+                        bytes: { context.meter.add(bytes: $0) },
                         progress: { files, bytes, current in
-                            context.meter.set(bytesDone: bytes)
                             context.meter.setDetail(current)
                             DispatchQueue.main.async {
                                 self.state = .running(files: files, bytes: bytes, current: current)

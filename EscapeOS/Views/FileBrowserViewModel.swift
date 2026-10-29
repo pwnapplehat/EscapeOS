@@ -952,8 +952,8 @@ final class FileBrowserViewModel: ObservableObject {
                     for: target,
                     selection: selection,
                     estimate: { context.meter.setTotals(bytes: $0) },
-                    progress: { _, bytes, current in
-                        context.meter.set(bytesDone: bytes)
+                    bytes: { context.meter.add(bytes: $0) },
+                    progress: { _, _, current in
                         context.meter.setDetail(current)
                     },
                     isCancelled: { context.isCancelled }

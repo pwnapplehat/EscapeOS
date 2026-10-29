@@ -89,7 +89,8 @@ final class BackupCatalog {
     }
 
     func loadRecord(at url: URL) throws -> BackupRecord {
-        let reader = try ZipReader(url: url)
+        // Only backup.json is wanted, and a backup can hold hundreds of thousands of entries.
+        let reader = try ZipReader(url: url, only: [BackupPaths.metadataFileName])
         guard reader.entries[BackupPaths.metadataFileName] != nil else {
             throw BackupError.invalidArchive("Missing \(BackupPaths.metadataFileName)")
         }

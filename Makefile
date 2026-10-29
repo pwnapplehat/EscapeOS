@@ -51,6 +51,9 @@ EscapeOS_FILES = \
 	EscapeOS/Engine/PasteConflicts.swift \
 	EscapeOS/Engine/AppDiscovery.swift \
 	EscapeOS/Engine/BackupService.swift \
+	EscapeOS/Engine/BackupArchiver.swift \
+	EscapeOS/Engine/BackupRestorer.swift \
+	EscapeOS/Engine/StreamingSHA256.swift \
 	EscapeOS/Engine/ZipWriter.swift \
 	EscapeOS/Engine/ZipPassword.swift \
 	EscapeOS/Engine/SevenZipAES.swift \

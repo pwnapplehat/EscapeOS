@@ -21,7 +21,8 @@ trap 'rm -rf "$OUT"' EXIT
 # Engine files under test. Each must import nothing the host lacks.
 ENGINE=(FileKind FileService DeleteConfirmation SpaceCheck PasteConflicts ContainerSearch FavoritesStore
         ProgressMeter JobQueue FileTransfer ZipWriter ShareStaging TrashStore
-        BackupSelection ImportStaging SQLiteDatabase SQLiteWorkingCopy)
+        BackupSelection ImportStaging SQLiteDatabase SQLiteWorkingCopy
+        StreamingSHA256 ZipReader BackupPaths BackupArchiver BackupRestorer)
 
 SOURCES=("$ROOT"/Tests/HostTests/*.swift)
 for name in "${ENGINE[@]}"; do SOURCES+=("$ROOT/EscapeOS/Engine/$name.swift"); done

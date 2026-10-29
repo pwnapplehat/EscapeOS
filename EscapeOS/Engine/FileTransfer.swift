@@ -37,6 +37,17 @@ extension TransferObserver {
     }
 }
 
+/// Runs `body` in an autorelease pool on Apple platforms, where Foundation returns autoreleased
+/// objects: a loop that reads a chunk at a time then frees each chunk as it goes, not when the whole
+/// job ends.
+func withAutoreleasePool<T>(_ body: () throws -> T) rethrows -> T {
+    #if canImport(ObjectiveC)
+    return try autoreleasepool(invoking: body)
+    #else
+    return try body()
+    #endif
+}
+
 extension FileService {
     /// How much is read and written at a time. Small enough that memory stays flat on a multi-GB
     /// file and progress moves smoothly; big enough that throughput is not lost to syscalls.
@@ -291,10 +302,6 @@ extension FileService {
 
     /// Bounds memory per chunk on Apple platforms, where Foundation returns autoreleased objects.
     private func pooled<T>(_ body: () throws -> T) rethrows -> T {
-        #if canImport(ObjectiveC)
-        return try autoreleasepool(invoking: body)
-        #else
-        return try body()
-        #endif
+        try withAutoreleasePool(body)
     }
 }

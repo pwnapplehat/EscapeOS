@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.1] - 2026-10-29
+
+### Fixed
+
+- **A backup no longer stops at 5,000 files or 512 MB.** Backing up an app with many files, or a lot of data, failed with "Safety limit exceeded (too many files or too much data)", and restoring such a backup was refused too ("Backup exceeds the maximum supported file count" / "size"). Both limits are gone, for backing up and for restoring, whole or chosen files. The only limit left is the free space on the device, which is checked before a backup starts.
+  - A backup is written in the ZIP64 form when it needs it (more than 65,535 files, or a file or archive over 4 GB). A small backup is still the same plain zip as before, and backups made by 0.2.0 and earlier restore as before.
+  - Files go through in pieces, hashed as they are written, instead of each file being read into memory whole. (0.2.0 said backups already did this. They did not; Compress and Share Zip did. Backups now really do, so a backup holding a very large file no longer risks the app being closed by iOS for memory.) The manifest is written to a scratch file as the backup goes, so it does not pile up in memory either.
+  - Restore writes each file to a scratch file beside its destination, checks it against its hash, and only then moves it over the original, so a damaged file never replaces a good one, and the app's data is not left with a half-written file if you cancel. Restore also shows a percentage, speed and time left by size, not only by file count.
+  - The Backups list reads only each backup's `backup.json`, and maps the archive instead of loading it into memory, so a list holding a large backup opens quickly.
+  - A full disk or other write failure during a backup now says that the write failed, instead of "Container inaccessible".
+  - Progress for a backup of many small files is reported a few times a second rather than once per file.
+
+### Not changed
+
+Compress and Share Zip still stop at 20,000 files or 2 GB, and Extract reads each file into memory, so it keeps its limits too. Restoring reads a backup's file list into memory (about half a kilobyte per file), which is fine for hundreds of thousands of files.
+
+**Status.** The new code has automated tests on a computer (1,180 checks, plus a 660 MB backup and restore and a 4.4 GB archive checked with unzip and Python's zipfile), and key lines were broken on purpose to confirm the tests notice. The screens are the ones of 0.2.0 and have not been run on an iPhone; the only change to them is how progress is reported.
+
 ## [0.2.0] - 2026-10-29
 
 Builds the six requests left open after 0.1.8 (https://github.com/pwnapplehat/EscapeOS/issues/7, #8, #9, #10, #11 and #12).
@@ -17,7 +35,7 @@ Builds the six requests left open after 0.1.8 (https://github.com/pwnapplehat/Es
 
 ### Changed
 
-- **Compress, Share Zip and backups no longer read each file into memory whole.** Zip files are written by streaming, so a large file no longer risks the app being closed by iOS for using too much memory. Zip entries now store their names as UTF-8, so accented names are not garbled by other tools. Links inside a folder are skipped by Compress and Share Zip: following one could loop back up the tree.
+- **Compress and Share Zip no longer read each file into memory whole.** Zip files are written by streaming, so a large file no longer risks the app being closed by iOS for using too much memory. (This entry first said backups too; backups did not stream until 0.2.1.) Zip entries now store their names as UTF-8, so accented names are not garbled by other tools. Links inside a folder are skipped by Compress and Share Zip: following one could loop back up the tree.
 - **Copying and moving between folders and apps keeps the "do not back up" mark** that iOS puts on cache files (it is an extended attribute), as the previous method did, and reports progress and can be cancelled. A cancelled or failed copy removes what it had written.
 - **The delete confirmation says what will happen.** With the Trash on it says the items move to the Trash and can be restored; with it off it still says they are deleted permanently.
 - **A job that fails after you have left the screen it started from** now leaves a notice above the tab bar (with the reason, until dismissed) instead of failing silently.

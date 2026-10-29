@@ -50,7 +50,7 @@ The IPA will install on iOS 18.0 or later (`MinimumOSVersion` 18.0). **Opening a
 
 iOS 15, 16, and 17 cannot install this IPA.
 
-**0.2.0 status.** The logic behind the new features (share several, drop, queue, Trash, selective backup and restore, SQLite editor) has automated tests, but the screens that use it have not yet been run on a device. Until they have, the table above describes 0.1.8's verified behaviour only. `docs/device-checklist-0.2.0.md` lists what to check.
+**0.2.x status.** The logic behind the 0.2 features (share several, drop, queue, Trash, selective backup and restore, SQLite editor, backups of any size) has automated tests, but the screens that use it have not been run on a device. Until they have, the table above describes 0.1.8's verified behaviour only. `docs/device-checklist-0.2.0.md` lists what to check.
 
 ## Requirements
 

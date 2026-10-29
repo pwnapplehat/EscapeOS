@@ -76,24 +76,30 @@ extension FileService {
     /// huge tree the result is a lower bound: fine for refusing work that cannot fit, never for
     /// promising that it will.
     func treeBytes(at path: String, maxNodes: Int = Int.max) -> Int64 {
+        treeBytesBounded(at: path, maxNodes: maxNodes).bytes
+    }
+
+    /// As `treeBytes`, and says whether the whole tree was counted (false: it stopped at `maxNodes`,
+    /// so the bytes are a lower bound).
+    func treeBytesBounded(at path: String, maxNodes: Int = Int.max) -> (bytes: Int64, complete: Bool) {
         let fm = FileManager.default
-        guard let rootType = (try? fm.attributesOfItem(atPath: path))?[.type] as? FileAttributeType else { return 0 }
+        guard let rootType = (try? fm.attributesOfItem(atPath: path))?[.type] as? FileAttributeType else { return (0, true) }
         if rootType != FileAttributeType.typeDirectory {
-            return ((try? fm.attributesOfItem(atPath: path))?[.size] as? NSNumber)?.int64Value ?? 0
+            return (((try? fm.attributesOfItem(atPath: path))?[.size] as? NSNumber)?.int64Value ?? 0, true)
         }
-        guard let walker = fm.enumerator(atPath: path) else { return 0 }
+        guard let walker = fm.enumerator(atPath: path) else { return (0, true) }
         var total: Int64 = 0
         var nodes = 0
         while let relative = walker.nextObject() as? String {
             nodes += 1
-            if nodes > maxNodes { break }
+            if nodes > maxNodes { return (total, false) }
             let full = (path as NSString).appendingPathComponent(relative)
             guard let attrs = try? fm.attributesOfItem(atPath: full) else { continue }
             if (attrs[.type] as? FileAttributeType) == FileAttributeType.typeRegular {
                 total += (attrs[.size] as? NSNumber)?.int64Value ?? 0
             }
         }
-        return total
+        return (total, true)
     }
 
     func totalBytes(of items: [FileItem]) -> Int64 {

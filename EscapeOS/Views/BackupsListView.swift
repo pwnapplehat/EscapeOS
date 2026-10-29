@@ -517,6 +517,8 @@ final class RestoreViewModel: ObservableObject {
                         record: session.record,
                         to: app,
                         selection: session.selection,
+                        estimate: { context.meter.setTotals(bytes: $0) },
+                        bytes: { context.meter.add(bytes: $0) },
                         progress: { done, total, current in
                             context.meter.setTotals(items: total)
                             context.meter.setItems(done: done, detail: current)
