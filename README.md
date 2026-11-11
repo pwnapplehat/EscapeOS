@@ -6,19 +6,19 @@
 
 On-device file browser and backup tool for another app's Data container. No jailbreak. No Keychain.
 
-**Sideload the IPA with [iPASide](https://github.com/pwnapplehat/iPASide)** on Windows. iPASide writes the pairing file EscapeOS needs. When the iPASide build includes App Group signing (`docs/app-group-signing.md` in that repo), it also keeps `group.com.ipaside.escapeos`. The 1.2.14 installer does not include that signer yet. A custom certificate that already has App Groups still works with this IPA: EscapeOS uses a group that is in the installed signature.
+**Sideload the IPA with [iPASide](https://github.com/pwnapplehat/iPASide)** on Windows. iPASide 1.2.15 or later writes the pairing file and keeps the App Group this IPA needs. A custom certificate that already has App Groups also works: EscapeOS uses a group that is in the installed signature.
 
 </div>
 
 ## Sideload
 
-1. Install [iPASide](https://github.com/pwnapplehat/iPASide/releases/latest). For the App Group to be registered by iPASide itself, that build has to include the signer described in iPASide's `docs/app-group-signing.md`. iPASide 1.2.14 does not. A certificate that already has App Groups, such as the eSign custom certificate checked on 2026-11-11, does not need that iPASide change.
+1. Install [iPASide 1.2.15 or later](https://github.com/pwnapplehat/iPASide/releases/latest).
 2. Download `EscapeOS-0.3.0.ipa` from [Releases](https://github.com/pwnapplehat/EscapeOS/releases).
 3. Sideload that IPA with iPASide. Trust the developer profile on the iPhone when iOS asks.
 4. iPASide places `pairingFile.plist` after install. To do it later: Settings → Pairing file → Place.
 5. Install [LocalDevVPN](https://apps.apple.com/app/id6755608044), connect it on `10.7.0.1`, leave Wi-Fi on, and open EscapeOS. The PC is not required after the pairing file is in place.
 
-iPASide's App Group signer registers `group.com.ipaside.escapeos` with the Apple ID that signs the app. Until that signer is in the installed iPASide, a custom certificate whose profile already contains App Groups is the path that was checked on device.
+iPASide registers `group.com.ipaside.escapeos` with the Apple ID that signs the app. A custom certificate whose profile already contains App Groups also works.
 
 ## What it does
 
