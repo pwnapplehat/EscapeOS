@@ -8,6 +8,20 @@ struct InstalledApp: Identifiable, Hashable {
     let name: String
     let containerPath: String
     let version: String?
+    /// App Groups from the install record. A group with a path can be browsed.
+    let groups: [AppGroupContainer]
+
+    /// The same app, opened at one group folder instead of its Data container.
+    func browsing(_ group: AppGroupContainer) -> InstalledApp? {
+        guard let path = group.path else { return nil }
+        return InstalledApp(
+            bundleIdentifier: bundleIdentifier,
+            name: name,
+            containerPath: path,
+            version: version,
+            groups: []
+        )
+    }
 }
 
 /// Errors surfaced by tunnel-based app discovery.
@@ -36,7 +50,7 @@ enum AppDiscoveryError: LocalizedError {
 }
 
 /// Discovers installed apps on-device via LocalDevVPN + a pairing file.
-/// iOS 26.4+ uses RPPairing/RSD; iOS 18 falls back to lockdown over the same VPN.
+/// iOS 26.4+ uses RPPairing/RSD; older supported versions use lockdown over the same VPN.
 final class AppDiscovery {
 
     private let tunnel = TunnelContext.shared
@@ -78,11 +92,22 @@ final class AppDiscovery {
             // Container path (Data container).
             guard let container = info["Container"] as? String, !container.isEmpty else { continue }
             let version = info["CFBundleShortVersionString"] as? String
+            let groups = AppGroupListing.containers(in: info)
+            if groups.isEmpty {
+                let keys = AppGroupListing.groupKeyNames(in: info)
+                if !keys.isEmpty {
+                    NSLog("AppGroups: %@ has no usable group list; keys %@", bundleId, keys.joined(separator: ", "))
+                }
+            } else {
+                let browsable = groups.filter(\.canBrowse).count
+                NSLog("AppGroups: %@ %d with a folder, %d identifier(s) only", bundleId, browsable, groups.count - browsable)
+            }
             apps.append(InstalledApp(
                 bundleIdentifier: bundleId,
                 name: name,
                 containerPath: container,
-                version: version
+                version: version,
+                groups: groups
             ))
         }
 

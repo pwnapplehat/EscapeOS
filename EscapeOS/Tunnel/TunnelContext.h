@@ -3,8 +3,8 @@
 //  EscapeOS
 //
 //  Two LocalDevVPN paths, same pairing file iLoader writes (lockdown + RP keys):
-//  iOS 26.4+ uses RPPairing/RSD on 10.7.0.1:49152; iOS 18 uses lockdown TCP on
-//  port 62078. Try RP first, then classic.
+//  iOS 26.4+ uses RPPairing/RSD on 10.7.0.1:49152. Try that first, then lockdown
+//  TCP on port 62078.
 //
 
 #import <Foundation/Foundation.h>
@@ -32,7 +32,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// Remove the stored pairing file.
 - (void)resetPairingFile;
 
-/// Connect over LocalDevVPN. Tries Remote Pairing (iOS 26.4+), then lockdown (iOS 18).
+/// Connect over LocalDevVPN. Tries Remote Pairing (iOS 26.4+), then lockdown.
 /// Returns YES on success; on failure fills error.
 - (BOOL)startHeartbeat:(NSError **)error;
 

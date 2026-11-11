@@ -51,6 +51,7 @@ EscapeOS_FILES = \
 	EscapeOS/Engine/SpaceCheck.swift \
 	EscapeOS/Engine/PasteConflicts.swift \
 	EscapeOS/Engine/AppDiscovery.swift \
+	EscapeOS/Engine/AppGroupListing.swift \
 	EscapeOS/Engine/BackupService.swift \
 	EscapeOS/Engine/BackupArchiver.swift \
 	EscapeOS/Engine/BackupRestorer.swift \

@@ -5,7 +5,7 @@ enum ProductLimits {
     static let title = "Sandbox access with limits"
 
     static let body = """
-EscapeOS lists installed apps through LocalDevVPN and a pairing file (iOS 18 and iOS 26), then opens another app's Data container: Documents, Library, and tmp. House Arrest is only how a PC can drop that pairing file into EscapeOS Documents — it does not replace pairing, and it cannot list or open other apps from inside EscapeOS.
+EscapeOS lists installed apps through LocalDevVPN and a pairing file, then opens another app's Data container: Documents, Library, and tmp. House Arrest is only how a PC can drop that pairing file into EscapeOS Documents — it does not replace pairing, and it cannot list or open other apps from inside EscapeOS.
 
 You can browse, preview, edit, back up, restore, and reclaim cache/tmp space in those containers. Reclaim never deletes Documents, Preferences, Application Support, Keychain, App Groups, or system folders. Reset App Data on an app’s detail screen does empty Documents, Library, and tmp.
 

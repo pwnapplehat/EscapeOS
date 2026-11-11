@@ -19,7 +19,7 @@ OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
 # Engine files under test. Each must import nothing the host lacks.
-ENGINE=(FileKind FileService DeleteConfirmation SpaceCheck PasteConflicts ContainerSearch FavoritesStore
+ENGINE=(FileKind FileService DeleteConfirmation SpaceCheck PasteConflicts ContainerSearch AppGroupListing FavoritesStore
         ProgressMeter JobQueue FileTransfer ZipWriter ShareStaging TrashStore
         BackupSelection ImportStaging SQLiteDatabase SQLiteWorkingCopy
         StreamingSHA256 ZipReader BackupPaths BackupArchiver BackupRestorer)

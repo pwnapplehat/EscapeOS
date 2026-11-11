@@ -14,7 +14,7 @@ Do **not** set `UIDesignRequiresCompatibility` in `Info.plist` for release build
 ### Public release (recommended)
 
 1. Open the project on a Mac with **Xcode 26**.
-2. Build with the iOS 26 SDK (deployment target iOS 18).
+2. Build with the iOS 26 SDK. The IPA minimum is iOS 26.0.
 3. Archive and export the IPA for distribution.
 
 The shipping UI is SwiftUI `TabView` in `RootView`. Linking against the iOS 26 SDK is what enables Liquid Glass; Theos/WSL cannot do that because it uses the iPhoneOS 16.5 SDK.
@@ -27,7 +27,7 @@ cd ~/apps/EscapeOS
 make clean package
 ```
 
-The Makefile pins `iphone:clang:16.5:18.0` because newer Apple SDKs require Xcode’s Apple Clang and fail under Linux clang.
+The Makefile pins `iphone:clang:16.5:18.0` because this Linux SDK is iPhoneOS 16.5 and a higher compiler minimum does not build. The IPA's `MinimumOSVersion` is 26.0, so it does not install below that.
 
 On a repo checked out on a Windows drive (`/mnt/g/...`), `make package` stops at
 `control directory has bad permissions 777`, because drvfs ignores `chmod`. Build

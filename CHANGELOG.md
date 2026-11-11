@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.2] - 2026-11-11
+
+### Added
+
+- **An app's App Groups can be browsed** when the install record includes the folder. The app's detail screen lists them. A group whose folder path is missing is shown and cannot be opened. Reset App Data still does not touch groups. Confirmed on device the same day.
+- **A backup zip can be imported.** Backups → Import Backup copies an exported EscapeOS backup into Files → On My iPhone → EscapeOS → Backups. A zip that is not one of these backups is refused. A name that is already there is kept, and the import lands beside it. Confirmed on device the same day.
+
+### Changed
+
+- **Search Whole App lands on a file instead of opening it.** A folder still opens. A file opens the folder that contains it and marks that file. Confirmed on device the same day.
+- **The IPA no longer installs below iOS 26.0.** `MinimumOSVersion` is 26.0.
+
 ## [0.3.1] - 2026-11-11
 
 ### Fixed
@@ -159,9 +171,9 @@ v0.1.0 is unchanged on GitHub. This is a new tag and IPA.
 
 First public sideload IPA.
 
-- App list via LocalDevVPN. iOS 26.4+ uses Remote Pairing/RSD (`10.7.0.1:49152`); iOS 18 falls back to lockdown loopback (`10.7.0.1:62078`). No USB while using the app.
+- App list via LocalDevVPN. iOS 26.4+ uses Remote Pairing/RSD (`10.7.0.1:49152`). No USB while using the app.
 - Path-scoped Data-container browse, edit, share, backup zip + restore. Select for multi-select Copy/Cut/Paste/Duplicate/Delete; Copy Path, Copy Bundle ID, and Copy SHA-256.
 - Pairing setup names EscapeOS and iPASide. iLoader is not required; iPASide writes the same merged pairing file as iLoader and places `pairingFile.plist`.
 - README shows the app icon with transparent corners (no black frame).
-- Supported container access follows [bad_query](https://github.com/forcequitOS/bad_query): **iOS 26.0–26.6.1** and **iOS 27.0 beta 4**. Later 26.x / 27.x builds are unsupported. IPA `MinimumOSVersion` is 18.0; iOS 18 listing is in code, untested. Hardware-verified: iPhone 17, **iOS 26.5.1**.
+- Supported container access follows [bad_query](https://github.com/forcequitOS/bad_query): **iOS 26.0–26.6.1** and **iOS 27.0 beta 4**. Later 26.x / 27.x builds are unsupported. Hardware-verified: iPhone 17, **iOS 26.5.1**.
 - Verified on iPhone 17, iOS 26.5.1, with iPASide placing the pairing file after install (list, browse, Select/copy-paste, backup).

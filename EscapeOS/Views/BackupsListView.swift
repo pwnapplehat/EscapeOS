@@ -31,11 +31,14 @@ struct BackupsListView: View {
                         .foregroundColor(.secondary)
                     Text("No Backups Yet")
                         .font(.headline)
-                    Text("Export a backup from any app under Apps → Backup Data. Archives are saved to Files → On My iPhone → EscapeOS → Backups.")
+                    Text("Export a backup from any app under Apps → Backup Data, or import a backup zip you saved earlier. Archives live in Files → On My iPhone → EscapeOS → Backups.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
+                    Button("Import Backup") { importBackup() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(vm.isImporting)
                 }
                 .padding()
             } else {
@@ -66,6 +69,15 @@ struct BackupsListView: View {
         }
         .navigationTitle("Backups")
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    importBackup()
+                } label: {
+                    Image(systemName: "square.and.arrow.down")
+                }
+                .accessibilityLabel("Import Backup")
+                .disabled(vm.isImporting)
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     vm.reload()
@@ -104,6 +116,9 @@ struct BackupsListView: View {
         } message: {
             Text("The backup archive is permanently deleted from this device. This can’t be undone. Use Share / Save to Files first if you want to keep a copy.")
         }
+        .alert(item: $vm.importError) { error in
+            Alert(title: Text("Could Not Import Backup"), message: Text(error.message), dismissButton: .default(Text("OK")))
+        }
         .sheet(item: $sharePayload) { payload in
             ActivityShareView(urls: payload.urls)
         }
@@ -114,6 +129,14 @@ struct BackupsListView: View {
             return "Delete the backup of “\(only.displayTitle)”?"
         }
         return pendingBackupDelete.isEmpty ? "Delete backup?" : "Delete \(pendingBackupDelete.count) backups?"
+    }
+
+    private func importBackup() {
+        FilePickerPresenter.present(contentTypes: [.zip, .archive, .data, .item], allowsMultiple: false) { urls in
+            guard let url = urls.first else { return }
+            FilePickerPresenter.noteReceived([url])
+            vm.importArchive(from: url)
+        }
     }
 }
 
@@ -401,6 +424,8 @@ final class BackupsListViewModel: ObservableObject {
     @Published var picking: BackupRecord?
     @Published var alertError: IdentifiedAlert?
     @Published var deleteError: IdentifiedAlert?
+    @Published var importError: IdentifiedAlert?
+    @Published var isImporting = false
 
     private let catalog = BackupCatalog()
     private let restoreService = RestoreService()
@@ -481,6 +506,30 @@ final class BackupsListViewModel: ObservableObject {
             deleteError = IdentifiedAlert(
                 message: "Could not delete the backup of \(failed.joined(separator: ", ")). It is still on this device. Try again, or remove it in Files, On My iPhone, EscapeOS, Backups."
             )
+        }
+    }
+
+    /// Copy a previously exported backup zip into the Backups folder.
+    func importArchive(from url: URL) {
+        guard !isImporting else { return }
+        isImporting = true
+        importError = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let record = try self.catalog.importArchive(from: url)
+                DispatchQueue.main.async {
+                    FilePickerPresenter.discardCopy(url)
+                    self.isImporting = false
+                    CopyFeedback.shared.show("Imported backup of “\(record.displayTitle)”")
+                    self.reload()
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    FilePickerPresenter.discardCopy(url)
+                    self.isImporting = false
+                    self.importError = IdentifiedAlert(message: error.localizedDescription)
+                }
+            }
         }
     }
 }

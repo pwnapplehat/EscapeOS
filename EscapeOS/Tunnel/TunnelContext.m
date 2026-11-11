@@ -242,7 +242,7 @@
     NSString *rpText = rpErr.localizedDescription ?: @"Remote Pairing did not connect";
     NSString *classicText = classicErr.localizedDescription ?: @"lockdown loopback did not connect";
     if (error) {
-        *error = [self _error:[NSString stringWithFormat:@"%@ (iOS 26.4+ path). %@ (iOS 18 path). Enable LocalDevVPN on 10.7.0.1, stay on Wi-Fi. The PC is not needed after the pairing file is placed.", rpText, classicText] code:-1];
+        *error = [self _error:[NSString stringWithFormat:@"%@ %@ Enable LocalDevVPN on 10.7.0.1, stay on Wi-Fi. The PC is not needed after the pairing file is placed.", rpText, classicText] code:-1];
     }
     return NO;
 }

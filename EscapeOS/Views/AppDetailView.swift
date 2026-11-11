@@ -98,6 +98,35 @@ struct AppDetailView: View {
                 }
             }
 
+            if !app.groups.isEmpty {
+                Section(
+                    header: Text("App Groups"),
+                    footer: Text("These are this app's group folders. Reset App Data does not touch them. A group with no folder path cannot be opened.")
+                ) {
+                    ForEach(app.groups) { group in
+                        if let browsed = app.browsing(group) {
+                            NavigationLink(destination: FileBrowserView(app: browsed, rootTitle: group.identifier)) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(group.identifier)
+                                        .lineLimit(1)
+                                    Text("Browse")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        } else {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(group.identifier)
+                                    .lineLimit(1)
+                                Text("No folder path in the install record.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+
             Section(footer: Text("Saves Documents, Library, and tmp into Files → On My iPhone → EscapeOS → Backups. Keychain is never included. Close \(app.name) first for a consistent snapshot.")) {
                 NavigationLink(destination: FileBrowserView(app: app)) {
                     Label("Browse Files", systemImage: "folder.fill")

@@ -13,7 +13,7 @@ On-device file browser and backup tool for another app's Data container. No jail
 ## Sideload
 
 1. Install [iPASide 1.2.15 or later](https://github.com/pwnapplehat/iPASide/releases/latest).
-2. Download `EscapeOS-0.3.1.ipa` from [Releases](https://github.com/pwnapplehat/EscapeOS/releases).
+2. Download `EscapeOS-0.3.2.ipa` from [Releases](https://github.com/pwnapplehat/EscapeOS/releases).
 3. Sideload that IPA with iPASide. Trust the developer profile on the iPhone when iOS asks.
 4. iPASide places `pairingFile.plist` after install. To do it later: Settings → Pairing file → Place.
 5. Install [LocalDevVPN](https://apps.apple.com/app/id6755608044), connect it on `10.7.0.1`, leave Wi-Fi on, and open EscapeOS. The PC is not required after the pairing file is in place.
@@ -22,11 +22,12 @@ iPASide registers `group.com.ipaside.escapeos` with the Apple ID that signs the 
 
 ## What it does
 
-- Lists installed user apps. Search by name or bundle ID. A–Z on the right edge jumps the list. **Search Whole App** finds a name anywhere in that app's data. **Favorites** pins files and folders at the top of the Apps tab.
+- Lists installed user apps. Search by name or bundle ID. A–Z on the right edge jumps the list. **Search Whole App** finds a name anywhere in that app's data. A file opens the folder it is in and marks the file. A folder opens that folder. **Favorites** pins files and folders at the top of the Apps tab.
 - Browses that app's Data container: Documents, Library, and tmp. Create, preview, edit, rename, and share. Share keeps the original file name. Import from Files copies the chosen file in, so Open still delivers it after a re-sign, and asks Replace, Keep Both, or Cancel when the name is already there.
+- Lists that app's App Groups when the install record includes them, and opens a group that has a folder. Reset App Data does not touch groups.
 - Select for Copy, Cut, Paste, Duplicate, Compress, and Delete. Paste asks Replace, Keep Both, or Cancel when the name exists. Copy Path and Copy Bundle ID go to the clipboard.
 - Compresses files and folders to a zip in the current folder. Extracts zip, 7z, tar, gz, bz2, xz, lz4, lzma, and deb. Encrypted zip and 7z ask for a password. RAR is not unpacked.
-- Backs up Documents, Library, and tmp to a zip plus `manifest.json` (SHA-256 per file) in Files → On My iPhone → EscapeOS → Backups, and restores that archive into the same app. Backups are not capped at 5,000 files or 512 MB. Share a backup, back up only what you select, and restore only the files you tick.
+- Backs up Documents, Library, and tmp to a zip plus `manifest.json` (SHA-256 per file) in Files → On My iPhone → EscapeOS → Backups, and restores that archive into the same app. An exported backup zip can be imported back into that folder. Backups are not capped at 5,000 files or 512 MB. Share a backup, back up only what you select, and restore only the files you tick.
 - Shows progress, speed, and time left on long jobs, with Cancel. Those jobs run one after another.
 - Deletes into a Trash (Settings → Trash) that can restore an item without overwriting a name that is already there. Settings can turn Trash off.
 - Opens `.db`, `.sqlite`, and `.sqlite3` as tables. Edits happen on a copy. Save refuses if the app changed the database after you opened it, keeps the original in the Trash, and swaps the file in.
@@ -36,16 +37,15 @@ iPASide registers `group.com.ipaside.escapeos` with the Apple ID that signs the 
 ## What it does not do
 
 - Keychain
-- Browsing another app's App Groups, system paths, or the signed `.app` bundle
-- iOS 15, 16, or 17. `MinimumOSVersion` is 18.0, so those versions cannot install the IPA
+- System paths, or the signed `.app` bundle
+- iOS 25 and earlier. `MinimumOSVersion` is 26.0, so those versions cannot install the IPA
 
 ## Compatibility
 
-Opening another app's Data container uses [worse_query](https://github.com/forcequitOS/worse_query). Upstream's range is **iOS 26.0 through 26.7.2**, and **iOS 27.2**. Other builds are unsupported, not assumed. The IPA still installs on iOS 18 or later. Listing apps on iOS 18 is in the code. Container browse is not in worse_query's range there.
+Opening another app's Data container uses [worse_query](https://github.com/forcequitOS/worse_query). Upstream's range is **iOS 26.0 through 26.7.2**, and **iOS 27.2**. Other builds are unsupported, not assumed. The IPA does not install below iOS 26.0.
 
 | System | Container browse | App list | Hardware |
 |---|---|---|---|
-| iOS 18 | Not in worse_query's range | Lockdown loopback `10.7.0.1:62078` | Not tested |
 | iOS 26.0 – 26.3 | Upstream: yes | Remote Pairing listing is a 26.4+ recipe | Not tested |
 | iOS 26.4 – 26.7.2 | Upstream: yes | Remote Pairing / RSD `10.7.0.1:49152` from 26.4 | iPhone 17: container open checked on 2026-11-11 with iPASide and with eSign plus a custom certificate. Earlier 0.1.x screens were checked on iOS 26.5.1 |
 | iOS 26.7.3 and later 26.x | Unsupported | — | — |
@@ -56,12 +56,7 @@ Opening another app's Data container uses [worse_query](https://github.com/force
 
 - iPhone on a version in the table above, for opening another app's data
 - [LocalDevVPN](https://apps.apple.com/app/id6755608044) on `10.7.0.1`, Wi-Fi on, no USB while using EscapeOS
-- A pairing file from iPASide (Create keys / Place). An iLoader pairing file can be imported instead
-
-| | iOS 18 | iOS 26.4 and later in the supported range |
-|---|---|---|
-| App list | Lockdown loopback `10.7.0.1:62078` | Remote Pairing / RSD `10.7.0.1:49152` |
-| Pairing file | USB-trust keys are enough. iPASide still writes Remote Pairing keys into the same file | Lockdown-only files fail. The file needs Remote Pairing keys (`identifier`, Ed25519 `public_key` / `private_key`) |
+- A pairing file from iPASide (Create keys / Place). An iLoader pairing file can be imported instead. On iOS 26.4 and later the file needs its Remote Pairing keys (`identifier`, Ed25519 `public_key` / `private_key`). A lockdown-only file fails there. The app list uses Remote Pairing / RSD at `10.7.0.1:49152`.
 
 ## Why a pairing file
 
@@ -73,7 +68,7 @@ Without the pairing file there is no app list. After iPASide has placed the file
 
 ## Build
 
-Theos, iPhoneOS 16.5 SDK, deployment target iOS 18.0. A Mac with Xcode 26 can relink for Liquid Glass. See [docs/BUILD.md](docs/BUILD.md).
+Theos, iPhoneOS 16.5 SDK. The IPA's minimum is iOS 26.0. A Mac with Xcode 26 can relink for Liquid Glass. See [docs/BUILD.md](docs/BUILD.md).
 
 ```sh
 export THEOS=~/theos

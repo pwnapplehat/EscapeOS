@@ -51,6 +51,24 @@ enum BackupPaths {
         return f.string(from: date)
     }
 
+    /// A name that does not replace a zip already in `directory`.
+    static func uniqueArchiveURL(in directory: URL, preferredName: String) -> URL {
+        let cleaned = preferredName.replacingOccurrences(of: "/", with: "_")
+        let ns = cleaned as NSString
+        var base = ns.deletingPathExtension
+        var ext = ns.pathExtension
+        if base.isEmpty { base = "Backup" }
+        if ext.isEmpty { ext = "zip" }
+        var candidate = directory.appendingPathComponent("\(base).\(ext)")
+        var number = 2
+        let fm = FileManager.default
+        while fm.fileExists(atPath: candidate.path), number < 1000 {
+            candidate = directory.appendingPathComponent("\(base) \(number).\(ext)")
+            number += 1
+        }
+        return candidate
+    }
+
     static let displayStamp: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -111,5 +129,30 @@ final class BackupCatalog {
 
     func delete(record: BackupRecord) throws {
         try FileManager.default.removeItem(at: record.archiveURL)
+    }
+
+    func importArchive(from source: URL) throws -> BackupRecord {
+        try importArchive(from: source, into: nil)
+    }
+
+    /// Copy an exported EscapeOS backup zip into `directory`, or the Backups folder when that is nil.
+    ///
+    /// A zip that is not one of these backups is refused. A name that is already there is kept,
+    /// and the import lands beside it. A file that is already in that folder is left where it is.
+    func importArchive(from source: URL, into directory: URL?) throws -> BackupRecord {
+        #if os(iOS)
+        let accessing = source.startAccessingSecurityScopedResource()
+        defer { if accessing { source.stopAccessingSecurityScopedResource() } }
+        #endif
+        _ = try loadRecord(at: source)
+        let folder = try directory ?? BackupPaths.ensureBackupsDirectory()
+        let sourcePath = source.standardizedFileURL.path
+        let root = folder.standardizedFileURL.path
+        if sourcePath == root || sourcePath.hasPrefix(root.hasSuffix("/") ? root : root + "/") {
+            return try loadRecord(at: source)
+        }
+        let destination = BackupPaths.uniqueArchiveURL(in: folder, preferredName: source.lastPathComponent)
+        try FileManager.default.copyItem(at: source, to: destination)
+        return try loadRecord(at: destination)
     }
 }

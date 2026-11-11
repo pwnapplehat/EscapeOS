@@ -25,20 +25,20 @@ struct FileBrowserView: View {
     @State private var showDropCollision = false
     @State private var showAppSearch = false
     @State private var showTrash = false
-    @State private var jumpFolder: String?
+    @State private var highlightedPath: String?
+    @State private var folderJump: FolderJump?
+    /// Title used at the root of this browser. An App Group uses its identifier instead of the folder's UUID.
+    private let rootTitle: String?
     @State private var pendingSearchHit: SearchHit?
     /// The folder row (or `vm.currentPath` for the whole list) a drag is hovering over.
     @State private var dropTarget: String?
     @ObservedObject private var favorites = FavoritesModel.shared
 
-    init(app: InstalledApp) {
+    init(app: InstalledApp, initialPath: String? = nil, highlightPath: String? = nil, rootTitle: String? = nil) {
         self.app = app
-        _vm = StateObject(wrappedValue: FileBrowserViewModel(app: app))
-    }
-
-    init(app: InstalledApp, initialPath: String) {
-        self.app = app
+        self.rootTitle = rootTitle
         _vm = StateObject(wrappedValue: FileBrowserViewModel(app: app, initialPath: initialPath))
+        _highlightedPath = State(initialValue: highlightPath)
     }
 
     var body: some View {
@@ -59,7 +59,7 @@ struct FileBrowserView: View {
                 fileList
             }
         }
-        .navigationTitle(selecting ? selectionTitle : vm.displayTitle)
+        .navigationTitle(browserTitle)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Filter this folder")
         .toolbar {
@@ -186,13 +186,18 @@ struct FileBrowserView: View {
                 .hidden()
                 NavigationLink(
                     destination: Group {
-                        if let folder = jumpFolder {
-                            FileBrowserView(app: app, initialPath: folder)
+                        if let jump = folderJump {
+                            FileBrowserView(
+                                app: app,
+                                initialPath: jump.path,
+                                highlightPath: jump.highlightPath,
+                                rootTitle: rootTitle
+                            )
                         }
                     },
                     isActive: Binding(
-                        get: { jumpFolder != nil },
-                        set: { if !$0 { jumpFolder = nil } }
+                        get: { folderJump != nil },
+                        set: { if !$0 { folderJump = nil } }
                     )
                 ) { EmptyView() }
                 .hidden()
@@ -389,13 +394,27 @@ struct FileBrowserView: View {
         )
     }
 
-    /// A search result opens the folder, or the file in the viewer.
+    /// A search result opens the folder. A file lands in that folder, marked, instead of opening.
     private func openSearchHit(_ hit: SearchHit) {
         if hit.item.isDirectory {
-            jumpFolder = hit.item.path
-        } else {
-            openRequest = OpenRequest(item: hit.item, mode: .auto)
+            folderJump = FolderJump(path: hit.item.path, highlightPath: nil)
+            return
         }
+        let parent = (hit.item.path as NSString).deletingLastPathComponent
+        if parent == vm.currentPath {
+            searchText = ""
+            highlightedPath = hit.item.path
+        } else {
+            folderJump = FolderJump(path: parent, highlightPath: hit.item.path)
+        }
+    }
+
+    private var browserTitle: String {
+        if selecting { return selectionTitle }
+        if vm.currentPath == app.containerPath, let rootTitle, !rootTitle.isEmpty {
+            return rootTitle
+        }
+        return vm.displayTitle
     }
 
     private var allVisibleSelected: Bool {
@@ -413,8 +432,10 @@ struct FileBrowserView: View {
     }
 
     private var fileList: some View {
-        List {
+        ScrollViewReader { proxy in
+            List {
             ForEach(visibleItems) { item in
+                Group {
                 if selecting {
                     Button {
                         toggleSelection(item)
@@ -428,13 +449,11 @@ struct FileBrowserView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .listRowBackground(selected.contains(item.path) ? Color.accentColor.opacity(0.12) : nil)
                 } else if item.isDirectory {
-                    NavigationLink(destination: FileBrowserView(app: app, initialPath: item.path)) {
+                    NavigationLink(destination: FileBrowserView(app: app, initialPath: item.path, rootTitle: rootTitle)) {
                         FileRow(item: item)
                     }
                     .contentShape(Rectangle())
-                    .listRowBackground(dropTarget == item.path ? Color.accentColor.opacity(0.18) : nil)
                     .onDrop(
                         of: [UTType.item],
                         isTargeted: Binding(
@@ -462,6 +481,9 @@ struct FileBrowserView: View {
                     .contentShape(Rectangle())
                     .contextMenu { itemMenu(for: item) }
                 }
+                }
+                .id(item.path)
+                .listRowBackground(rowBackground(for: item))
             }
             .onDelete(perform: deleteAtOffsets)
         }
@@ -488,6 +510,31 @@ struct FileBrowserView: View {
         }
         .onChange(of: vm.items.map(\.path)) { paths in
             selected.formIntersection(Set(paths))
+            revealHighlight(proxy)
+        }
+        .onAppear { revealHighlight(proxy) }
+        .onChange(of: highlightedPath) { _ in revealHighlight(proxy) }
+        }
+    }
+
+    private func rowBackground(for item: FileItem) -> Color? {
+        if selecting && selected.contains(item.path) {
+            return Color.accentColor.opacity(0.12)
+        }
+        if item.path == highlightedPath {
+            return Color.accentColor.opacity(0.28)
+        }
+        if dropTarget == item.path {
+            return Color.accentColor.opacity(0.18)
+        }
+        return nil
+    }
+
+    private func revealHighlight(_ proxy: ScrollViewProxy) {
+        guard let path = highlightedPath else { return }
+        guard visibleItems.contains(where: { $0.path == path }) else { return }
+        DispatchQueue.main.async {
+            proxy.scrollTo(path, anchor: .center)
         }
     }
 
@@ -755,6 +802,12 @@ struct FileBrowserView: View {
 enum CreateKind {
     case file
     case folder
+}
+
+/// Where a search result should land: the folder, and the file to mark in it.
+private struct FolderJump: Hashable {
+    let path: String
+    let highlightPath: String?
 }
 
 private struct OpenRequest: Identifiable {
