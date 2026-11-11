@@ -537,7 +537,7 @@ final class FileBrowserViewModel: ObservableObject {
         run(payloads.count == 1 ? "Importing “\(payloads[0].name)”" : "Importing \(payloads.count) items") { context in
             try Self.assertPath(destDir, under: self.app.containerPath)
             try self.writeImportPayloads(payloads, into: destDir, policy: policy, context: context)
-            return nil
+            return payloads.count == 1 ? "Imported “\(payloads[0].name)”" : "Imported \(payloads.count) files"
         }
     }
 
@@ -545,7 +545,10 @@ final class FileBrowserViewModel: ObservableObject {
         var payloads: [ImportPayload] = []
         for url in urls {
             let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            defer {
+                if accessing { url.stopAccessingSecurityScopedResource() }
+                FilePickerPresenter.discardCopy(url)
+            }
             let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
             if isDirectory {
                 throw FileServiceError.operationFailed(

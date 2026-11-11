@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.1] - 2026-11-11
+
+### Fixed
+
+- **Import from Files and Import Pairing File deliver the file after a re-sign.** Both used SwiftUI's file importer, which returns a security-scoped URL tied to the app's signing identity. When a re-sign gives the app an App ID that is not its bundle id, tapping Open did nothing. The pickers now copy the chosen file into EscapeOS and read that copy. A finished import shows a confirmation. Confirmed on device the same day.
+
 ## [0.3.0] - 2026-11-11
 
 ### Changed

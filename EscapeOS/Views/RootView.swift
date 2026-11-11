@@ -126,8 +126,17 @@ struct RootView: View {
 /// Shown when no pairing file is present: import + LocalDevVPN instructions.
 struct PairingSetupView: View {
     @ObservedObject var viewModel: AppListViewModel
-    @State private var showImporter = false
     @State private var importError: String?
+
+    private static let pairingTypes: [UTType] = [
+        .item,
+        .data,
+        .content,
+        .propertyList,
+        .xml,
+        .text,
+        UTType(filenameExtension: "mobiledevicepairing", conformingTo: .data) ?? .data
+    ]
 
     var body: some View {
         ScrollView {
@@ -153,7 +162,11 @@ struct PairingSetupView: View {
                 .padding(.horizontal)
 
                 Button {
-                    showImporter = true
+                    FilePickerPresenter.present(contentTypes: Self.pairingTypes, allowsMultiple: false) { urls in
+                        guard let url = urls.first else { return }
+                        FilePickerPresenter.noteReceived([url])
+                        importPairingFile(at: url)
+                    }
                 } label: {
                     Label("Import Pairing File", systemImage: "doc.badge.plus")
                         .frame(maxWidth: .infinity)
@@ -177,49 +190,40 @@ struct PairingSetupView: View {
                 .padding(.top, 4)
             }
         }
-        .fileImporter(
-            isPresented: $showImporter,
-            allowedContentTypes: [
-                .item,
-                .data,
-                .content,
-                .propertyList,
-                .xml,
-                .text,
-                UTType(filenameExtension: "mobiledevicepairing", conformingTo: .data) ?? .data
-            ]
-        ) { result in
-            switch result {
-            case .success(let url):
-                do {
-                    let accessing = url.startAccessingSecurityScopedResource()
-                    defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                    let data = try Data(contentsOf: url)
-                    let contents: String
-                    if let utf8 = String(data: data, encoding: .utf8), !utf8.isEmpty {
-                        contents = utf8
-                    } else if let xml = try? PropertyListSerialization.data(
-                        fromPropertyList: try PropertyListSerialization.propertyList(from: data, options: [], format: nil),
-                        format: .xml,
-                        options: 0
-                    ), let text = String(data: xml, encoding: .utf8) {
-                        contents = text
-                    } else {
-                        throw NSError(
-                            domain: "EscapeOS",
-                            code: -2,
-                            userInfo: [NSLocalizedDescriptionKey: "Could not read that pairing file."]
-                        )
-                    }
-                    try viewModel.importPairingFile(contents)
-                    importError = nil
-                    viewModel.reload()
-                } catch {
-                    importError = error.localizedDescription
-                }
-            case .failure(let error):
-                importError = error.localizedDescription
+    }
+
+    /// The picker has already copied the file into this app. Read it either way: a copy has no
+    /// security scope, so a hard stop on that call would reject the file.
+    private func importPairingFile(at url: URL) {
+        do {
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessing { url.stopAccessingSecurityScopedResource() }
+                FilePickerPresenter.discardCopy(url)
             }
+            let data = try Data(contentsOf: url)
+            let contents: String
+            if let utf8 = String(data: data, encoding: .utf8), !utf8.isEmpty {
+                contents = utf8
+            } else if let xml = try? PropertyListSerialization.data(
+                fromPropertyList: try PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+                format: .xml,
+                options: 0
+            ), let text = String(data: xml, encoding: .utf8) {
+                contents = text
+            } else {
+                throw NSError(
+                    domain: "EscapeOS",
+                    code: -2,
+                    userInfo: [NSLocalizedDescriptionKey: "Could not read that pairing file."]
+                )
+            }
+            try viewModel.importPairingFile(contents)
+            importError = nil
+            CopyFeedback.shared.show("Pairing file imported")
+            viewModel.reload()
+        } catch {
+            importError = error.localizedDescription
         }
     }
 }

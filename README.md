@@ -13,7 +13,7 @@ On-device file browser and backup tool for another app's Data container. No jail
 ## Sideload
 
 1. Install [iPASide 1.2.15 or later](https://github.com/pwnapplehat/iPASide/releases/latest).
-2. Download `EscapeOS-0.3.0.ipa` from [Releases](https://github.com/pwnapplehat/EscapeOS/releases).
+2. Download `EscapeOS-0.3.1.ipa` from [Releases](https://github.com/pwnapplehat/EscapeOS/releases).
 3. Sideload that IPA with iPASide. Trust the developer profile on the iPhone when iOS asks.
 4. iPASide places `pairingFile.plist` after install. To do it later: Settings → Pairing file → Place.
 5. Install [LocalDevVPN](https://apps.apple.com/app/id6755608044), connect it on `10.7.0.1`, leave Wi-Fi on, and open EscapeOS. The PC is not required after the pairing file is in place.
@@ -23,7 +23,7 @@ iPASide registers `group.com.ipaside.escapeos` with the Apple ID that signs the 
 ## What it does
 
 - Lists installed user apps. Search by name or bundle ID. A–Z on the right edge jumps the list. **Search Whole App** finds a name anywhere in that app's data. **Favorites** pins files and folders at the top of the Apps tab.
-- Browses that app's Data container: Documents, Library, and tmp. Create, preview, edit, rename, and share. Share keeps the original file name. Import from Files asks Replace, Keep Both, or Cancel when the name is already there.
+- Browses that app's Data container: Documents, Library, and tmp. Create, preview, edit, rename, and share. Share keeps the original file name. Import from Files copies the chosen file in, so Open still delivers it after a re-sign, and asks Replace, Keep Both, or Cancel when the name is already there.
 - Select for Copy, Cut, Paste, Duplicate, Compress, and Delete. Paste asks Replace, Keep Both, or Cancel when the name exists. Copy Path and Copy Bundle ID go to the clipboard.
 - Compresses files and folders to a zip in the current folder. Extracts zip, 7z, tar, gz, bz2, xz, lz4, lzma, and deb. Encrypted zip and 7z ask for a password. RAR is not unpacked.
 - Backs up Documents, Library, and tmp to a zip plus `manifest.json` (SHA-256 per file) in Files → On My iPhone → EscapeOS → Backups, and restores that archive into the same app. Backups are not capped at 5,000 files or 512 MB. Share a backup, back up only what you select, and restore only the files you tick.

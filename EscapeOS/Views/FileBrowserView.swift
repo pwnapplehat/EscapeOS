@@ -15,7 +15,6 @@ struct FileBrowserView: View {
     @State private var searchText = ""
     @State private var openRequest: OpenRequest?
     @State private var propertiesItem: FileItem?
-    @State private var showImporter = false
     @State private var selecting = false
     @State private var selected = Set<String>()
     @State private var pendingDelete: [FileItem] = []
@@ -111,7 +110,13 @@ struct FileBrowserView: View {
                             Label("New Folder", systemImage: "folder.badge.plus")
                         }
                         Button {
-                            showImporter = true
+                            FilePickerPresenter.present(
+                                contentTypes: [.item, .data, .content, .archive, .image, .text, .sourceCode, .propertyList],
+                                allowsMultiple: true
+                            ) { urls in
+                                FilePickerPresenter.noteReceived(urls)
+                                vm.importFiles(from: urls)
+                            }
                         } label: {
                             Label("Import from Files", systemImage: "square.and.arrow.down")
                         }
@@ -357,18 +362,6 @@ struct FileBrowserView: View {
         }) {
             AppSearchView(app: app) { hit in
                 pendingSearchHit = hit
-            }
-        }
-        .fileImporter(
-            isPresented: $showImporter,
-            allowedContentTypes: [.item, .data, .content, .archive, .image, .text, .sourceCode, .propertyList],
-            allowsMultipleSelection: true
-        ) { result in
-            switch result {
-            case .success(let urls):
-                vm.importFiles(from: urls)
-            case .failure(let error):
-                vm.operationError = IdentifiedError(message: error.localizedDescription)
             }
         }
     }

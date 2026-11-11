@@ -15,6 +15,7 @@ EscapeOS_FILES = \
 	EscapeOS/Views/AppListView.swift \
 	EscapeOS/Views/AppDetailView.swift \
 	EscapeOS/Views/FileBrowserView.swift \
+	EscapeOS/Views/FilePicker.swift \
 	EscapeOS/Views/FileViewerView.swift \
 	EscapeOS/Views/HexEditorView.swift \
 	EscapeOS/Views/FilePropertiesView.swift \
