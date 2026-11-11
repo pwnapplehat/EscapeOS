@@ -29,7 +29,19 @@ make clean package
 
 The Makefile pins `iphone:clang:16.5:18.0` because newer Apple SDKs require Xcode’s Apple Clang and fail under Linux clang.
 
-`EscapeOS/Tunnel/libidevice_ffi.a` is not in git (≈93 MB). Download it from the same GitHub Release as the IPA, or rebuild `jkcoxson/idevice` for `aarch64-apple-ios`, and place it at `EscapeOS/Tunnel/libidevice_ffi.a` before `make package`.
+On a repo checked out on a Windows drive (`/mnt/g/...`), `make package` stops at
+`control directory has bad permissions 777`, because drvfs ignores `chmod`. Build
+the app in release mode and make the IPA by hand, which is the same payload `package`
+would have produced:
+
+```bash
+make clean && make FINALPACKAGE=1
+rm -rf _scratch && mkdir -p _scratch/Payload
+cp -a .theos/_/Applications/EscapeOS.app _scratch/Payload/
+(cd _scratch && zip -qry ../EscapeOS.ipa Payload)
+```
+
+`EscapeOS/Tunnel/libidevice_ffi.a` is not in git (≈93 MB). Download it from the same GitHub Release as the IPA, or rebuild `jkcoxson/idevice` for `aarch64-apple-ios`, and place it at `EscapeOS/Tunnel/libidevice_ffi.a` before building.
 
 After install, place `pairingFile.plist` again from the PC: iPASide Settings → Pairing file → Place (House Arrest), or share the file in Files.
 

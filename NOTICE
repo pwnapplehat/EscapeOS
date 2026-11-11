@@ -1,24 +1,29 @@
-Third-party origins in EscapeOS (as of 2026-08-17)
+Third-party origins in EscapeOS (as of 2026-11-09)
 
 This project is published under GNU Affero General Public License v3.0
 because tunnel/applist code is adapted from StikDebug (AGPL-3.0). See LICENSE.
 
-1. EscapeOS/Engine/bad_query.c, bad_query.h, xpc_shim.h
-   Adapted from forcequitOS/bad_query (public GitHub push 2026-08-11).
-   Upstream had no LICENSE file at the time of adaptation.
-   EscapeOS redistributes these files with that attribution. The upstream author
-   did not grant a public license; a later rewrite remains desirable.
+1. EscapeOS/Engine/worse_query.m, worse_query.h
+   Adapted from forcequitOS/worse_query (https://github.com/forcequitOS/worse_query),
+   main at commit d1540e2, 2026-11-08.
+   Copyright (C) 2026 Taj C (forcequit).
+   Licensed under GNU GPL-3.0. AGPL-3.0 section 13 permits combining it into this
+   AGPL-3.0 work; EscapeOS conveys the result under AGPL-3.0 and keeps this notice.
 
-2. EscapeOS/Tunnel/applist.m, applist.h, and RPPairing usage in TunnelContext.m
+2. EscapeOS/Engine/xpc_shim.h
+   Local declarations for the two libxpc symbols worse_query.m calls. The
+   cross-compile SDK does not ship xpc/xpc.h; both symbols resolve from libSystem.
+
+3. EscapeOS/Tunnel/applist.m, applist.h, and RPPairing usage in TunnelContext.m
    Adapted from StikDebug / StikJIT idevice bindings.
    StikDebug is licensed under GNU AGPL-3.0.
    That is why EscapeOS as a combined work is AGPL-3.0.
 
-3. EscapeOS/Tunnel/libidevice_ffi.a and idevice.h
+4. EscapeOS/Tunnel/libidevice_ffi.a and idevice.h
    Built from jkcoxson/idevice, MIT License.
    https://github.com/jkcoxson/idevice
 
-4. vendor/SWCompression (4.8.6) and vendor/BitByteData (2.0.4)
+5. vendor/SWCompression (4.8.6) and vendor/BitByteData (2.0.4)
    Timofey Solomko, MIT License.
    Used to extract 7z, tar, gzip, bzip2, xz, lz4, lzma, and zip (non-password).
    EscapeOS decrypts 7-Zip AES-256 archives (SHA-256 key derivation + AES-CBC)

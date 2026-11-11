@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0] - 2026-11-11
+
+### Changed
+
+- **Opening another app's data uses [worse_query](https://github.com/forcequitOS/worse_query) instead of bad_query.** Upstream's range is iOS 26.0 through 26.7.2, and iOS 27.2. The IPA carries an App Group entitlement (`group.com.ipaside.escapeos`). iPASide reads that entitlement and registers the group when it signs. A custom certificate that substitutes its own App Groups still works: EscapeOS uses a group that is actually in the installed signature.
+- Checked on an iPhone 17 the same day: another app's data opened after an iPASide sign, and again after eSign with a custom certificate.
+
 ## [0.2.1] - 2026-10-29
 
 ### Fixed

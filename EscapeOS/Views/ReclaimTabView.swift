@@ -244,7 +244,7 @@ final class ReclaimTabViewModel: ObservableObject {
             let total = apps.count
             var completedCount = 0
             // Two apps at a time: faster than one-by-one, without opening every
-            // container handle at once (that can make bad_query fail).
+            // container handle at once (too many at once can make the escape fail).
             let gate = DispatchSemaphore(value: 2)
             let group = DispatchGroup()
             let queue = DispatchQueue(label: "escapeos.reclaim.scan", qos: .utility, attributes: .concurrent)

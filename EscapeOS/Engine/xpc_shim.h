@@ -1,5 +1,5 @@
 /*
- * Minimal extern declarations for the two libxpc entry points bad_query.c
+ * Minimal extern declarations for the two libxpc entry points worse_query.m
  * needs (xpc_string_create, xpc_release). This SDK copy does not ship
  * xpc/xpc.h, but libSystem.tbd (linked implicitly on iOS) exports both
  * symbols, so declaring the ABI directly here avoids needing the header.

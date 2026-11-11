@@ -62,7 +62,7 @@ EscapeOS_FILES = \
 	EscapeOS/Engine/zip_crypto.c \
 	EscapeOS/Engine/ContainerSearch.swift \
 	EscapeOS/Engine/FavoritesStore.swift \
-	EscapeOS/Engine/bad_query.c \
+	EscapeOS/Engine/worse_query.m \
 	EscapeOS/Tunnel/TunnelContext.m \
 	EscapeOS/Tunnel/applist.m \
 	EscapeOS/Tunnel/heartbeat.m

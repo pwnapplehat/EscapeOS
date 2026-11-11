@@ -2,13 +2,14 @@
 //  EscapeOS-Bridging-Header.h
 //  EscapeOS
 //
-//  Exposes the bad_query primitive and the RPPairing tunnel context to Swift.
+//  Exposes the containermanager primitives and the RPPairing tunnel context to
+//  Swift.
 //
 
 #ifndef EscapeOS_Bridging_Header_h
 #define EscapeOS_Bridging_Header_h
 
-#include "bad_query.h"
+#include "worse_query.h"
 #include "zip_crypto.h"
 #import "../Tunnel/TunnelContext.h"
 
