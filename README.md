@@ -38,7 +38,7 @@ iPASide registers `group.com.ipaside.escapeos` with the Apple ID that signs the 
 
 - Keychain
 - System paths, or the signed `.app` bundle
-- iOS 25 and earlier. `MinimumOSVersion` is 26.0, so those versions cannot install the IPA
+- iOS 18 and earlier. `MinimumOSVersion` is 26.0, so those versions cannot install the IPA
 
 ## Compatibility
 
